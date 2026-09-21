@@ -48,10 +48,11 @@ async def sync_one(db: Database, finam: FinamClient, symbol: str, timeframe: str
     now = datetime.now(timezone.utc)
     latest = await asyncio.to_thread(db.latest_timestamp, symbol, timeframe)
 
+    max_start = now - timedelta(days=history_days) + timedelta(minutes=5)
     if latest is None:
-        start = now - timedelta(days=history_days) + timedelta(minutes=5)
+        start = max_start
     else:
-        start = latest - timedelta(hours=1)
+        start = max(latest - timedelta(hours=1), max_start)
 
     finam_symbol = FINAM_LIVE_SYMBOLS.get(symbol, symbol)
     bars = await finam.bars(finam_symbol, timeframe, start, now)
