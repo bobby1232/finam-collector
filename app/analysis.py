@@ -87,37 +87,27 @@ def barrier_stats(bars: list[dict], horizon_bars: int, target: float = 500.0, st
         entry = _f(bars[i]["close"])
         samples += 1
         outcome = None
-        upper_ever = False
+        upper_first_minutes = None
         for j in range(i + 1, min(len(bars), i + 1 + horizon_bars)):
             hi = _f(bars[j]["high"])
             lo = _f(bars[j]["low"])
             up = hi >= entry + target
             dn = lo <= entry - target
-            if up:
-                upper_ever = True
-                if not hit_times or True:
-                    pass
+            if up and upper_first_minutes is None:
+                upper_first_minutes = (j - i) * 15
             if outcome is None and up and dn:
                 outcome = "same"
                 same_bar += 1
-                break
-            if outcome is None and up:
+            elif outcome is None and up:
                 outcome = "up"
                 wins += 1
                 hit_times.append((j - i) * 15)
-                break
-            if outcome is None and dn:
+            elif outcome is None and dn:
                 outcome = "down"
                 lower_first += 1
-                break
-        if upper_ever or outcome == "up":
+
+        if upper_first_minutes is not None:
             upper_hit += 1
-        elif outcome is None:
-            # Scan again only for the separate "upper at any time" metric when lower was not touched.
-            for j in range(i + 1, min(len(bars), i + 1 + horizon_bars)):
-                if _f(bars[j]["high"]) >= entry + target:
-                    upper_hit += 1
-                    break
         if outcome is None:
             no_upper += 1
 
