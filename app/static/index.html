@@ -49,6 +49,30 @@ function resize(c){const r=c.getBoundingClientRect(),d=devicePixelRatio||1;c.wid
 function fmt(n,d=2){return Number(n).toLocaleString('ru-RU',{maximumFractionDigits:d})}
 function xPos(i,n,w,p){return p+(n<2?0:i/(n-1)*(w-2*p))}
 function yPos(v,mn,mx,h,p){return h-p-(v-mn)/(mx-mn||1)*(h-2*p)}
+function timeLabel(ts){
+  const dt=new Date(ts);
+  const time=dt.toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'});
+  const date=dt.toLocaleDateString('ru-RU',{day:'2-digit',month:'2-digit'});
+  if(rangeDays===1)return time;
+  if(rangeDays>1&&rangeDays<=7)return date+' '+time;
+  return date;
+}
+function drawTimeAxis(ctx,b,w,h,d,p){
+  if(!b.length)return;
+  const ticks=Math.min(7,b.length),labelY=h-8*d;
+  ctx.font=(11*d)+'px system-ui';
+  ctx.fillStyle='#8e9bab';
+  ctx.strokeStyle='#253140';
+  ctx.lineWidth=d;
+  for(let t=0;t<ticks;t++){
+    const i=ticks===1?0:Math.round(t*(b.length-1)/(ticks-1));
+    const x=xPos(i,b.length,w,p);
+    ctx.beginPath();ctx.moveTo(x,p);ctx.lineTo(x,h-p);ctx.stroke();
+    ctx.textAlign=t===0?'left':(t===ticks-1?'right':'center');
+    ctx.fillText(timeLabel(b[i].timestamp),x,labelY);
+  }
+  ctx.textAlign='left';
+}
 function priceChart(){
   const c=$('price'),{ctx,w,h,d}=resize(c),b=currentBars;ctx.clearRect(0,0,w,h);if(!b.length)return;
   const p=48*d,mn=Math.min(...b.map(x=>+x.low)),mx=Math.max(...b.map(x=>+x.high)),step=(w-2*p)/Math.max(1,b.length-1),bw=Math.max(1*d,Math.min(8*d,step*.7));
@@ -60,11 +84,13 @@ function priceChart(){
     ctx.fillStyle=color;const top=Math.min(yo,yc),bh=Math.max(1*d,Math.abs(yc-yo));ctx.fillRect(x-bw/2,top,bw,bh);
   });
   ctx.fillStyle='#8e9bab';ctx.font=(11*d)+'px system-ui';ctx.fillText(fmt(mx),4*d,p);ctx.fillText(fmt(mn),4*d,h-p);
+  drawTimeAxis(ctx,b,w,h,d,p);
 }
 function volumeChart(){
   const c=$('volume'),{ctx,w,h,d}=resize(c),b=currentBars;ctx.clearRect(0,0,w,h);if(!b.length)return;
   const p=22*d,v=b.map(x=>+x.volume||0),mx=Math.max(...v)||1,step=(w-2*p)/Math.max(1,v.length-1),bw=Math.max(1*d,Math.min(8*d,step*.75));
   b.forEach((z,i)=>{const val=+z.volume||0,x=xPos(i,b.length,w,p),bh=val/mx*(h-2*p);ctx.fillStyle=(+z.close>=+z.open)?'rgba(61,220,151,.55)':'rgba(255,107,107,.55)';ctx.fillRect(x-bw/2,h-p-bh,bw,bh)});
+  drawTimeAxis(ctx,b,w,h,d,p);
 }
 async function load(){
   const symbol=$('instrument').value;if(!symbol)return;const interval=$('interval').value,end=new Date(),start=rangeDays?new Date(end-rangeDays*86400000):new Date('2026-06-01T00:00:00+03:00');
