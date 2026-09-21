@@ -22,6 +22,20 @@ MOEX_INSTRUMENTS = {
     },
 }
 
+SI_FRONT = (
+    (date(2026, 6, 18), "SiM6"),
+    (date(2026, 9, 17), "SiU6"),
+    (date(2026, 12, 17), "SiZ6"),
+)
+
+
+def si_front_secid(day: date) -> str:
+    for expiry, secid in SI_FRONT:
+        if day <= expiry:
+            return secid
+    return "SiZ6"
+
+
 BRENT_FRONT = (
     (date(2026, 6, 1), "BRM6"),
     (date(2026, 7, 1), "BRN6"),
@@ -55,10 +69,10 @@ class MoexClient:
         date_to: date | None = None,
     ) -> list[dict[str, Any]]:
         date_to = date_to or date_from
-        if symbol == "BR@CONT":
+        if symbol in {"BR@CONT", "SI@CONT"}:
             if date_to != date_from:
-                raise RuntimeError("BR@CONT backfill expects one calendar day per request")
-            secid = brent_front_secid(date_from)
+                raise RuntimeError(f"{symbol} backfill expects one calendar day per request")
+            secid = brent_front_secid(date_from) if symbol == "BR@CONT" else si_front_secid(date_from)
             cfg = {
                 "url": (
                     "https://iss.moex.com/iss/engines/futures/markets/forts/"
