@@ -74,6 +74,86 @@ def wilson(successes: int, n: int, z: float = 1.96) -> tuple[float | None, float
     return max(0.0, center - half), min(1.0, center + half)
 
 
+
+def ema_series(values: list[float], period: int) -> list[float | None]:
+    out: list[float | None] = [None] * len(values)
+    if len(values) < period:
+        return out
+    e = sum(values[:period]) / period
+    out[period - 1] = e
+    alpha = 2.0 / (period + 1)
+    for i in range(period, len(values)):
+        e = alpha * values[i] + (1 - alpha) * e
+        out[i] = e
+    return out
+
+
+def rsi_series(values: list[float], period: int = 14) -> list[float | None]:
+    out: list[float | None] = [None] * len(values)
+    if len(values) <= period:
+        return out
+    gains, losses = [], []
+    for a, b in zip(values[:-1], values[1:]):
+        d = b - a
+        gains.append(max(d, 0.0))
+        losses.append(max(-d, 0.0))
+    avg_gain = sum(gains[:period]) / period
+    avg_loss = sum(losses[:period]) / period
+    out[period] = 100.0 if avg_loss == 0 else 100.0 - 100.0 / (1.0 + avg_gain / avg_loss)
+    for i in range(period + 1, len(values)):
+        g = gains[i - 1]
+        l = losses[i - 1]
+        avg_gain = (avg_gain * (period - 1) + g) / period
+        avg_loss = (avg_loss * (period - 1) + l) / period
+        out[i] = 100.0 if avg_loss == 0 else 100.0 - 100.0 / (1.0 + avg_gain / avg_loss)
+    return out
+
+
+def barrier_stats_indices(bars: list[dict], indices: list[int], horizon_bars: int, target: float = 500.0) -> dict:
+    wins = lower_first = same_bar = no_decisive = upper_hit = 0
+    hit_times: list[int] = []
+    valid = 0
+    for i in indices:
+        if i + horizon_bars + 1 >= len(bars):
+            continue
+        valid += 1
+        entry = _f(bars[i]["close"])
+        outcome = None
+        upper_first_minutes = None
+        for j in range(i + 1, i + 1 + horizon_bars):
+            hi, lo = _f(bars[j]["high"]), _f(bars[j]["low"])
+            up, dn = hi >= entry + target, lo <= entry - target
+            if up and upper_first_minutes is None:
+                upper_first_minutes = (j - i) * 15
+            if outcome is None and up and dn:
+                outcome = "same"
+                same_bar += 1
+            elif outcome is None and up:
+                outcome = "up"
+                wins += 1
+                hit_times.append((j - i) * 15)
+            elif outcome is None and dn:
+                outcome = "down"
+                lower_first += 1
+        if upper_first_minutes is not None:
+            upper_hit += 1
+        if outcome is None:
+            no_decisive += 1
+    lo, hi = wilson(wins, valid)
+    hit_lo, hit_hi = wilson(upper_hit, valid)
+    hit_times.sort()
+    return {
+        "samples": valid,
+        "plus500_before_minus500": wins / valid if valid else None,
+        "plus500_before_minus500_ci95": [lo, hi],
+        "plus500_anytime": upper_hit / valid if valid else None,
+        "plus500_anytime_ci95": [hit_lo, hit_hi],
+        "lower_first": lower_first,
+        "same_bar_ambiguous": same_bar,
+        "no_decisive_hit": no_decisive,
+        "median_minutes_to_plus500_when_first": hit_times[len(hit_times)//2] if hit_times else None,
+    }
+
 def barrier_stats(bars: list[dict], horizon_bars: int, target: float = 500.0, stride: int = 4) -> dict:
     wins = 0
     lower_first = 0
@@ -140,6 +220,17 @@ def build_si_analysis(db: Database, symbol: str = "SI@CONT") -> dict:
 
     closes15 = [_f(x["close"]) for x in bars15]
     closes1h = [_f(x["close"]) for x in bars1h]
+    ema20s = ema_series(closes15, 20)
+    ema50s = ema_series(closes15, 50)
+    rsi14s = rsi_series(closes15, 14)
+    similar_indices = [
+        i for i in range(0, len(bars15), 4)
+        if rsi14s[i] is not None
+        and ema20s[i] is not None
+        and ema50s[i] is not None
+        and rsi14s[i] <= 30
+        and closes15[i] < ema20s[i] < ema50s[i]
+    ]
 
     latest = bars15[-1]
     latest_ts = latest["timestamp"]
@@ -195,9 +286,18 @@ def build_si_analysis(db: Database, symbol: str = "SI@CONT") -> dict:
             "low": min(_f(x["low"]) for x in last20),
         },
         "barrier_probabilities": {
-            "1_trading_day": barrier_stats(bars15, 56, 500.0, 4),
-            "3_trading_days": barrier_stats(bars15, 56 * 3, 500.0, 4),
-            "5_trading_days": barrier_stats(bars15, 56 * 5, 500.0, 4),
+            "unconditional": {
+                "1_trading_day": barrier_stats(bars15, 56, 500.0, 4),
+                "3_trading_days": barrier_stats(bars15, 56 * 3, 500.0, 4),
+                "5_trading_days": barrier_stats(bars15, 56 * 5, 500.0, 4),
+            },
+            "similar_state_rsi_le_30_below_ema20_below_ema50": {
+                "condition": "15m RSI14 <= 30 and close < EMA20 < EMA50; hourly sampling",
+                "matching_starts": len(similar_indices),
+                "1_trading_day": barrier_stats_indices(bars15, similar_indices, 56, 500.0),
+                "3_trading_days": barrier_stats_indices(bars15, similar_indices, 56 * 3, 500.0),
+                "5_trading_days": barrier_stats_indices(bars15, similar_indices, 56 * 5, 500.0),
+            },
         },
     }
 
