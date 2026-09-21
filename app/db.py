@@ -86,11 +86,58 @@ class Database:
                 )
                 return cur.fetchone()[0]
 
-    def count(self, ticker: str, timeframe: str) -> int:
+    def stats(self, ticker: str, timeframe: str) -> dict[str, Any]:
         with psycopg.connect(self.url) as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT COUNT(*) FROM candles WHERE ticker=%s AND timeframe=%s",
-                    (ticker, timeframe),
+                    """
+                    SELECT
+                        COUNT(*) AS rows,
+                        MAX(ts) AS latest_timestamp,
+                        COUNT(volume) AS rows_with_volume,
+                        COUNT(*) FILTER (WHERE volume > 0) AS rows_with_positive_volume,
+                        MAX(volume) FILTER (WHERE ts = (
+                            SELECT MAX(c2.ts)
+                            FROM candles c2
+                            WHERE c2.ticker=%s AND c2.timeframe=%s
+                        )) AS latest_volume
+                    FROM candles
+                    WHERE ticker=%s AND timeframe=%s
+                    """,
+                    (ticker, timeframe, ticker, timeframe),
                 )
-                return cur.fetchone()[0]
+                row = cur.fetchone()
+                return {
+                    "rows": row[0],
+                    "latest_timestamp": row[1],
+                    "rows_with_volume": row[2],
+                    "rows_with_positive_volume": row[3],
+                    "latest_volume": row[4],
+                }
+
+    def recent_bars(self, ticker: str, timeframe: str, limit: int = 10) -> list[dict[str, Any]]:
+        limit = max(1, min(limit, 500))
+        with psycopg.connect(self.url) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT ts, open, high, low, close, volume, updated_at
+                    FROM candles
+                    WHERE ticker=%s AND timeframe=%s
+                    ORDER BY ts DESC
+                    LIMIT %s
+                    """,
+                    (ticker, timeframe, limit),
+                )
+                return [
+                    {
+                        "timestamp": r[0],
+                        "open": r[1],
+                        "high": r[2],
+                        "low": r[3],
+                        "close": r[4],
+                        "volume": r[5],
+                        "updated_at": r[6],
+                    }
+                    for r in cur.fetchall()
+                ]
