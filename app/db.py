@@ -47,6 +47,16 @@ DO UPDATE SET
 """
 
 
+INTERVALS = {
+    "1m": None,
+    "5m": "5 minutes",
+    "15m": "15 minutes",
+    "1h": "1 hour",
+    "4h": "4 hours",
+    "1d": "1 day",
+}
+
+
 def _num(value: Any) -> Decimal:
     if isinstance(value, dict):
         value = value.get("value")
@@ -202,25 +212,59 @@ class Database:
         start: datetime | None,
         end: datetime | None,
         max_points: int = 5000,
+        interval: str = "1m",
     ) -> list[dict[str, Any]]:
+        if interval not in INTERVALS:
+            raise ValueError(f"Unsupported interval: {interval}")
         max_points = max(100, min(max_points, 10000))
+
         conditions = ["ticker=%s", "timeframe=%s"]
-        params: list[Any] = [ticker, timeframe]
+        base_params: list[Any] = [ticker, timeframe]
         if start:
             conditions.append("ts >= %s")
-            params.append(start)
+            base_params.append(start)
         if end:
             conditions.append("ts <= %s")
-            params.append(end)
+            base_params.append(end)
         where = " AND ".join(conditions)
 
+        if interval == "1m":
+            base_sql = f"""
+                SELECT ts, open, high, low, close, volume, source
+                FROM candles
+                WHERE {where}
+            """
+            params = base_params
+        else:
+            bucket = INTERVALS[interval]
+            base_sql = f"""
+                SELECT
+                    date_bin(%s::interval, ts, TIMESTAMPTZ '2000-01-01') AS ts,
+                    (array_agg(open ORDER BY ts ASC))[1] AS open,
+                    MAX(high) AS high,
+                    MIN(low) AS low,
+                    (array_agg(close ORDER BY ts DESC))[1] AS close,
+                    SUM(COALESCE(volume, 0)) AS volume,
+                    CASE
+                        WHEN bool_and(source='finam') THEN 'finam'
+                        WHEN bool_and(source='moex') THEN 'moex'
+                        ELSE 'mixed'
+                    END AS source
+                FROM candles
+                WHERE {where}
+                GROUP BY 1
+            """
+            params = [bucket, *base_params]
+
         sql = f"""
-        WITH ranked AS (
-            SELECT ts, open, high, low, close, volume, source,
+        WITH base AS (
+            {base_sql}
+        ),
+        ranked AS (
+            SELECT *,
                    ROW_NUMBER() OVER (ORDER BY ts) AS rn,
                    COUNT(*) OVER () AS total
-            FROM candles
-            WHERE {where}
+            FROM base
         ),
         sampled AS (
             SELECT *,
@@ -233,6 +277,7 @@ class Database:
         ORDER BY ts
         """
         params.append(max_points)
+
         with psycopg.connect(self.url) as conn:
             with conn.cursor() as cur:
                 cur.execute(sql, params)

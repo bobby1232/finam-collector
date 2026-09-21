@@ -9,7 +9,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 
 from .config import DATABASE_URL, FINAM_SECRET, INSTRUMENTS, POLL_SECONDS
-from .db import Database
+from .db import Database, INTERVALS
 from .finam import FinamClient
 from .moex import MoexClient
 
@@ -261,17 +261,32 @@ async def api_candles(
     start: str | None = Query(None),
     end: str | None = Query(None),
     max_points: int = Query(5000, ge=100, le=10000),
+    interval: str = Query("1m"),
 ):
     configured = {(x.symbol, x.timeframe) for x in INSTRUMENTS}
     timeframe = timeframe.upper()
     if (symbol, timeframe) not in configured:
         raise HTTPException(status_code=404, detail="Instrument/timeframe is not configured")
 
+    if interval not in INTERVALS:
+        raise HTTPException(status_code=400, detail="Unsupported interval")
+
     db = Database(DATABASE_URL)
     rows = await asyncio.to_thread(
-        db.chart_bars, symbol, timeframe, parse_iso(start), parse_iso(end), max_points
+        db.chart_bars,
+        symbol,
+        timeframe,
+        parse_iso(start),
+        parse_iso(end),
+        max_points,
+        interval,
     )
-    return {"symbol": symbol, "timeframe": timeframe, "bars": rows}
+    return {
+        "symbol": symbol,
+        "timeframe": timeframe,
+        "interval": interval,
+        "bars": rows,
+    }
 
 
 @app.get("/bars")
