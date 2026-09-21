@@ -34,6 +34,11 @@ state = {
 }
 
 
+FINAM_LIVE_SYMBOLS = {
+    "BR@CONT": "BRV6@RTSX",
+}
+
+
 def key(symbol: str, timeframe: str) -> str:
     return f"{symbol}|{timeframe}"
 
@@ -47,7 +52,8 @@ async def sync_one(db: Database, finam: FinamClient, symbol: str, timeframe: str
     else:
         start = latest - timedelta(hours=1)
 
-    bars = await finam.bars(symbol, timeframe, start, now)
+    finam_symbol = FINAM_LIVE_SYMBOLS.get(symbol, symbol)
+    bars = await finam.bars(finam_symbol, timeframe, start, now)
     written = await asyncio.to_thread(db.upsert_bars, symbol, timeframe, bars, "finam")
 
     volume_present = sum(1 for b in bars if b.get("volume") is not None)
@@ -64,6 +70,7 @@ async def sync_one(db: Database, finam: FinamClient, symbol: str, timeframe: str
 
     result = {
         "symbol": symbol,
+        "finam_symbol": finam_symbol,
         "timeframe": timeframe,
         "last_sync": now.isoformat(),
         "received": len(bars),
@@ -74,8 +81,8 @@ async def sync_one(db: Database, finam: FinamClient, symbol: str, timeframe: str
     }
     state["instruments"][key(symbol, timeframe)] = result
     log.info(
-        "Synced %s %s: bars=%s volume_present=%s volume_positive=%s",
-        symbol, timeframe, len(bars), volume_present, volume_positive,
+        "Synced %s via %s %s: bars=%s volume_present=%s volume_positive=%s",
+        symbol, finam_symbol, timeframe, len(bars), volume_present, volume_positive,
     )
 
 
