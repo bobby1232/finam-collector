@@ -33,8 +33,9 @@ class MoexClient:
         self,
         symbol: str,
         date_from: date,
-        date_to: date,
+        date_to: date | None = None,
     ) -> list[dict[str, Any]]:
+        date_to = date_to or date_from
         cfg = MOEX_INSTRUMENTS.get(symbol)
         if not cfg:
             raise RuntimeError(f"No MOEX backfill mapping for {symbol}")
