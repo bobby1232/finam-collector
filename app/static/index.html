@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Finam Quotes</title>
+<style>
+:root{color-scheme:dark;--bg:#0b0f14;--panel:#121821;--line:#253140;--text:#e8edf3;--muted:#8e9bab;--good:#3ddc97;--bad:#ff6b6b;--accent:#73a7ff}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,system-ui,-apple-system,Segoe UI,sans-serif}
+.wrap{max-width:1400px;margin:auto;padding:24px}.header{display:flex;justify-content:space-between;gap:16px;align-items:center;flex-wrap:wrap}
+h1{font-size:24px;margin:0}.sub{color:var(--muted);font-size:13px}.controls{display:flex;gap:10px;flex-wrap:wrap}
+select,button{background:var(--panel);border:1px solid var(--line);color:var(--text);padding:9px 12px;border-radius:9px}
+button{cursor:pointer}button.active{border-color:var(--accent)}
+.cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:20px 0}
+.card,.panel{background:var(--panel);border:1px solid var(--line);border-radius:12px}.card{padding:14px}.panel{padding:14px;margin-top:12px}
+.label{font-size:12px;color:var(--muted)}.value{font-size:21px;margin-top:6px;font-variant-numeric:tabular-nums}
+canvas{width:100%;display:block}.price{height:440px}.volume{height:160px}
+.row{display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:8px}.status{font-size:12px;color:var(--muted)}.ok{color:var(--good)}
+@media(max-width:760px){.cards{grid-template-columns:repeat(2,1fr)}.price{height:320px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="header">
+  <div><h1>Market Data</h1><div class="sub">Finam Trade API live · MOEX ISS history</div></div>
+  <div class="controls">
+    <select id="instrument"></select>
+    <button data-range="1">1D</button><button data-range="7">7D</button><button data-range="30">1M</button><button data-range="0" class="active">С июня</button>
+  </div>
+</div>
+<div class="cards">
+  <div class="card"><div class="label">Последняя цена</div><div class="value" id="last">—</div></div>
+  <div class="card"><div class="label">Изменение периода</div><div class="value" id="change">—</div></div>
+  <div class="card"><div class="label">Последний volume</div><div class="value" id="vol">—</div></div>
+  <div class="card"><div class="label">Точек</div><div class="value" id="points">—</div></div>
+</div>
+<div class="panel"><div class="row"><strong>Цена закрытия</strong><span class="status" id="priceStatus"></span></div><canvas id="price" class="price"></canvas></div>
+<div class="panel"><div class="row"><strong>Объём</strong><span class="status" id="backfill"></span></div><canvas id="volume" class="volume"></canvas></div>
+</div>
+<script>
+const $=id=>document.getElementById(id);let rangeDays=0,currentBars=[];
+function resize(c){const r=c.getBoundingClientRect(),d=devicePixelRatio||1;c.width=Math.floor(r.width*d);c.height=Math.floor(r.height*d);return{ctx:c.getContext('2d'),w:c.width,h:c.height,d}}
+function fmt(n,d=2){return Number(n).toLocaleString('ru-RU',{maximumFractionDigits:d})}
+function xp(i,n,w,p){return p+(n<2?0:i/(n-1)*(w-2*p))}
+function line(){const c=$('price'),{ctx,w,h,d}=resize(c),b=currentBars;ctx.clearRect(0,0,w,h);if(!b.length)return;const p=44*d,v=b.map(x=>+x.close),mn=Math.min(...v),mx=Math.max(...v),sp=mx-mn||1;ctx.strokeStyle='#253140';ctx.lineWidth=d;for(let i=0;i<5;i++){const y=p+i*(h-2*p)/4;ctx.beginPath();ctx.moveTo(p,y);ctx.lineTo(w-p,y);ctx.stroke()}ctx.strokeStyle='#73a7ff';ctx.lineWidth=2*d;ctx.beginPath();v.forEach((z,i)=>{const x=xp(i,v.length,w,p),y=h-p-(z-mn)/sp*(h-2*p);i?ctx.lineTo(x,y):ctx.moveTo(x,y)});ctx.stroke();ctx.fillStyle='#8e9bab';ctx.font=(11*d)+'px system-ui';ctx.fillText(fmt(mx),4*d,p);ctx.fillText(fmt(mn),4*d,h-p)}
+function volume(){const c=$('volume'),{ctx,w,h,d}=resize(c),b=currentBars;ctx.clearRect(0,0,w,h);if(!b.length)return;const p=22*d,v=b.map(x=>+x.volume||0),mx=Math.max(...v)||1,bw=Math.max(d,(w-2*p)/v.length);ctx.fillStyle='#3ddc97';ctx.globalAlpha=.55;v.forEach((z,i)=>{const x=xp(i,v.length,w,p),bh=z/mx*(h-2*p);ctx.fillRect(x-bw/2,h-p-bh,Math.max(1,bw*.8),bh)});ctx.globalAlpha=1}
+async function load(){const symbol=$('instrument').value;if(!symbol)return;const end=new Date(),start=rangeDays?new Date(end-rangeDays*86400000):new Date('2026-06-01T00:00:00+03:00');$('priceStatus').textContent='загрузка…';const u=new URL('/api/candles',location.origin);u.searchParams.set('symbol',symbol);u.searchParams.set('timeframe','TIME_FRAME_M1');u.searchParams.set('start',start.toISOString());u.searchParams.set('end',end.toISOString());u.searchParams.set('max_points','5000');const r=await fetch(u),j=await r.json();currentBars=j.bars||[];const b=currentBars;if(b.length){const f=+b[0].close,l=+b[b.length-1].close,ch=(l/f-1)*100;$('last').textContent=fmt(l);$('change').textContent=(ch>=0?'+':'')+fmt(ch)+'%';$('change').style.color=ch>=0?'#3ddc97':'#ff6b6b';$('vol').textContent=fmt(b[b.length-1].volume,0);$('points').textContent=b.length.toLocaleString('ru-RU');$('priceStatus').textContent=new Date(b[b.length-1].timestamp).toLocaleString('ru-RU')}line();volume()}
+async function init(){const i=await(await fetch('/api/instruments')).json();i.instruments.forEach(x=>{const o=document.createElement('option');o.value=x.symbol;o.textContent=x.symbol.replace('@MISX','').replace('@RTSX','');$('instrument').appendChild(o)});$('instrument').onchange=load;document.querySelectorAll('[data-range]').forEach(b=>b.onclick=()=>{document.querySelectorAll('[data-range]').forEach(x=>x.classList.remove('active'));b.classList.add('active');rangeDays=+b.dataset.range;load()});setInterval(async()=>{try{const s=await(await fetch('/backfill/status')).json();$('backfill').textContent=s.status==='done'?'История с июня загружена':'Backfill: '+s.status+' · '+(s.current||'');$('backfill').className='status '+(s.status==='done'?'ok':'')}catch(e){}},3000);await load();setInterval(load,30000)}
+window.addEventListener('resize',()=>{line();volume()});init();
+</script>
+</body>
+</html>
