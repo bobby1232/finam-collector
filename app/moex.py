@@ -12,11 +12,30 @@ MOEX_INSTRUMENTS = {
         "url": "https://iss.moex.com/iss/engines/stock/markets/shares/boards/TQBR/securities/GAZP/candles.json",
         "secid": "GAZP",
     },
+    "ROSN@MISX": {
+        "url": "https://iss.moex.com/iss/engines/stock/markets/shares/boards/TQBR/securities/ROSN/candles.json",
+        "secid": "ROSN",
+    },
     "SiZ6@RTSX": {
         "url": "https://iss.moex.com/iss/engines/futures/markets/forts/securities/SiZ6/candles.json",
         "secid": "SiZ6",
     },
 }
+
+BRENT_FRONT = (
+    (date(2026, 6, 1), "BRM6"),
+    (date(2026, 7, 1), "BRN6"),
+    (date(2026, 8, 3), "BRQ6"),
+    (date(2026, 8, 31), "BRU6"),
+    (date(2026, 10, 1), "BRV6"),
+)
+
+
+def brent_front_secid(day: date) -> str:
+    for expiry, secid in BRENT_FRONT:
+        if day <= expiry:
+            return secid
+    return "BRV6"
 
 
 class MoexClient:
@@ -36,9 +55,21 @@ class MoexClient:
         date_to: date | None = None,
     ) -> list[dict[str, Any]]:
         date_to = date_to or date_from
-        cfg = MOEX_INSTRUMENTS.get(symbol)
-        if not cfg:
-            raise RuntimeError(f"No MOEX backfill mapping for {symbol}")
+        if symbol == "BR@CONT":
+            if date_to != date_from:
+                raise RuntimeError("BR@CONT backfill expects one calendar day per request")
+            secid = brent_front_secid(date_from)
+            cfg = {
+                "url": (
+                    "https://iss.moex.com/iss/engines/futures/markets/forts/"
+                    f"securities/{secid}/candles.json"
+                ),
+                "secid": secid,
+            }
+        else:
+            cfg = MOEX_INSTRUMENTS.get(symbol)
+            if not cfg:
+                raise RuntimeError(f"No MOEX backfill mapping for {symbol}")
 
         result: list[dict[str, Any]] = []
         start = 0
