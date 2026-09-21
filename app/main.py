@@ -122,33 +122,59 @@ async def backfill_loop():
     moex = MoexClient()
     try:
         start_date = datetime.fromisoformat(BACKFILL_FROM).date()
-        today = datetime.now(timezone.utc).date()
+        # FINAM owns the most recent 7 days; MOEX is used only for the deep-history gap.
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).date()
         state["backfill"]["status"] = "running"
 
         for instrument in INSTRUMENTS:
             if instrument.timeframe != "TIME_FRAME_M1":
                 continue
-            day = start_date
-            while day <= today:
+
+            completed = await asyncio.to_thread(
+                db.backfill_completed_through, instrument.symbol
+            )
+            day = start_date if completed is None else max(
+                start_date, completed + timedelta(days=1)
+            )
+
+            while day <= cutoff:
                 state["backfill"]["current"] = f"{instrument.symbol} {day.isoformat()}"
                 try:
                     bars = await moex.minute_bars(instrument.symbol, day)
                     if bars:
                         written = await asyncio.to_thread(
-                            db.upsert_bars, instrument.symbol, instrument.timeframe, bars, "moex"
+                            db.upsert_bars,
+                            instrument.symbol,
+                            instrument.timeframe,
+                            bars,
+                            "moex",
                         )
                         state["backfill"]["rows_written"] += written
+
+                    # Checkpoint every successfully processed calendar day, including weekends.
+                    await asyncio.to_thread(
+                        db.mark_backfill_completed, instrument.symbol, day
+                    )
                     state["backfill"]["days_done"] += 1
+                    state["backfill"]["last_error"] = None
+                    day += timedelta(days=1)
+                    await asyncio.sleep(0.05)
                 except Exception as exc:
                     state["backfill"]["last_error"] = repr(exc)
-                    log.exception("Backfill failed symbol=%s day=%s", instrument.symbol, day)
-                    await asyncio.sleep(2)
-                day += timedelta(days=1)
-                await asyncio.sleep(0.05)
+                    state["backfill"]["status"] = "error"
+                    log.exception(
+                        "Backfill failed symbol=%s day=%s",
+                        instrument.symbol,
+                        day,
+                    )
+                    return
 
         state["backfill"]["current"] = None
         state["backfill"]["status"] = "done"
-        log.info("Backfill completed rows_written=%s", state["backfill"]["rows_written"])
+        log.info(
+            "Backfill completed rows_written=%s",
+            state["backfill"]["rows_written"],
+        )
     finally:
         await moex.close()
 
