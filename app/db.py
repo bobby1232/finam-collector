@@ -20,16 +20,14 @@ CREATE TABLE IF NOT EXISTS candles (
     PRIMARY KEY (ticker, timeframe, ts)
 );
 
-ALTER TABLE candles
-ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'finam';
+ALTER TABLE candles ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'finam';
 
 CREATE INDEX IF NOT EXISTS idx_candles_ticker_tf_ts
 ON candles (ticker, timeframe, ts DESC);
 """
 
 UPSERT_SQL = """
-INSERT INTO candles
-    (ticker, timeframe, ts, open, high, low, close, volume, source, updated_at)
+INSERT INTO candles (ticker, timeframe, ts, open, high, low, close, volume, source, updated_at)
 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
 ON CONFLICT (ticker, timeframe, ts)
 DO UPDATE SET
@@ -42,24 +40,11 @@ DO UPDATE SET
     updated_at = NOW();
 """
 
-INTERVALS = {
-    "1m": None,
-    "5m": "5 minutes",
-    "15m": "15 minutes",
-    "1h": "1 hour",
-    "4h": "4 hours",
-    "1d": "1 day",
-}
-
 
 def _num(value: Any) -> Decimal:
     if isinstance(value, dict):
         value = value.get("value")
     return Decimal(str(value))
-
-
-def _json_num(value):
-    return None if value is None else float(value)
 
 
 class Database:
@@ -86,19 +71,17 @@ class Database:
         rows = []
         for bar in bars:
             ts = datetime.fromisoformat(bar["timestamp"].replace("Z", "+00:00"))
-            rows.append(
-                (
-                    ticker,
-                    timeframe,
-                    ts,
-                    _num(bar["open"]),
-                    _num(bar["high"]),
-                    _num(bar["low"]),
-                    _num(bar["close"]),
-                    _num(bar["volume"]) if bar.get("volume") is not None else None,
-                    source,
-                )
-            )
+            rows.append((
+                ticker,
+                timeframe,
+                ts,
+                _num(bar["open"]),
+                _num(bar["high"]),
+                _num(bar["low"]),
+                _num(bar["close"]),
+                _num(bar["volume"]) if bar.get("volume") is not None else None,
+                source,
+            ))
         with psycopg.connect(self.url) as conn:
             with conn.cursor() as cur:
                 cur.executemany(UPSERT_SQL, rows)
@@ -134,41 +117,25 @@ class Database:
                         MAX(ts) AS latest_timestamp,
                         COUNT(volume) AS rows_with_volume,
                         COUNT(*) FILTER (WHERE volume > 0) AS rows_with_positive_volume,
-                        (array_agg(close ORDER BY ts DESC))[1] AS latest_close,
-                        (array_agg(volume ORDER BY ts DESC))[1] AS latest_volume
+                        COUNT(*) FILTER (WHERE source='finam') AS finam_rows,
+                        COUNT(*) FILTER (WHERE source='moex') AS moex_rows
                     FROM candles
                     WHERE ticker=%s AND timeframe=%s
                     """,
                     (ticker, timeframe),
                 )
                 row = cur.fetchone()
-
-                cur.execute(
-                    """
-                    SELECT source, COUNT(*)
-                    FROM candles
-                    WHERE ticker=%s AND timeframe=%s
-                    GROUP BY source
-                    ORDER BY source
-                    """,
-                    (ticker, timeframe),
-                )
-                sources = {r[0]: r[1] for r in cur.fetchall()}
-
                 return {
                     "rows": row[0],
                     "earliest_timestamp": row[1],
                     "latest_timestamp": row[2],
                     "rows_with_volume": row[3],
                     "rows_with_positive_volume": row[4],
-                    "latest_close": row[5],
-                    "latest_volume": row[6],
-                    "sources": sources,
+                    "finam_rows": row[5],
+                    "moex_rows": row[6],
                 }
 
-    def recent_bars(
-        self, ticker: str, timeframe: str, limit: int = 10
-    ) -> list[dict[str, Any]]:
+    def recent_bars(self, ticker: str, timeframe: str, limit: int = 10) -> list[dict[str, Any]]:
         limit = max(1, min(limit, 500))
         with psycopg.connect(self.url) as conn:
             with conn.cursor() as cur:
@@ -199,58 +166,53 @@ class Database:
     def chart_bars(
         self,
         ticker: str,
-        interval: str,
-        date_from: datetime,
-        date_to: datetime,
+        timeframe: str,
+        start: datetime | None,
+        end: datetime | None,
+        max_points: int = 5000,
     ) -> list[dict[str, Any]]:
-        if interval not in INTERVALS:
-            raise ValueError(f"Unsupported interval: {interval}")
+        max_points = max(100, min(max_points, 10000))
+        conditions = ["ticker=%s", "timeframe=%s"]
+        params: list[Any] = [ticker, timeframe]
+        if start:
+            conditions.append("ts >= %s")
+            params.append(start)
+        if end:
+            conditions.append("ts <= %s")
+            params.append(end)
+        where = " AND ".join(conditions)
 
+        sql = f"""
+        WITH ranked AS (
+            SELECT ts, open, high, low, close, volume, source,
+                   ROW_NUMBER() OVER (ORDER BY ts) AS rn,
+                   COUNT(*) OVER () AS total
+            FROM candles
+            WHERE {where}
+        ),
+        sampled AS (
+            SELECT *,
+                   GREATEST(1, CEIL(total::numeric / %s)::int) AS stride
+            FROM ranked
+        )
+        SELECT ts, open, high, low, close, volume, source
+        FROM sampled
+        WHERE MOD(rn - 1, stride) = 0 OR rn = total
+        ORDER BY ts
+        """
+        params.append(max_points)
         with psycopg.connect(self.url) as conn:
             with conn.cursor() as cur:
-                if interval == "1m":
-                    cur.execute(
-                        """
-                        SELECT ts, open, high, low, close, volume
-                        FROM candles
-                        WHERE ticker=%s
-                          AND timeframe='TIME_FRAME_M1'
-                          AND ts >= %s AND ts <= %s
-                        ORDER BY ts
-                        """,
-                        (ticker, date_from, date_to),
-                    )
-                else:
-                    bucket = INTERVALS[interval]
-                    cur.execute(
-                        """
-                        SELECT
-                            date_bin(%s::interval, ts, TIMESTAMPTZ '2000-01-01') AS bucket,
-                            (array_agg(open ORDER BY ts ASC))[1] AS open,
-                            MAX(high) AS high,
-                            MIN(low) AS low,
-                            (array_agg(close ORDER BY ts DESC))[1] AS close,
-                            SUM(COALESCE(volume, 0)) AS volume
-                        FROM candles
-                        WHERE ticker=%s
-                          AND timeframe='TIME_FRAME_M1'
-                          AND ts >= %s AND ts <= %s
-                        GROUP BY bucket
-                        ORDER BY bucket
-                        """,
-                        (bucket, ticker, date_from, date_to),
-                    )
-
-                result = []
-                for r in cur.fetchall():
-                    result.append(
-                        {
-                            "time": int(r[0].timestamp()),
-                            "open": _json_num(r[1]),
-                            "high": _json_num(r[2]),
-                            "low": _json_num(r[3]),
-                            "close": _json_num(r[4]),
-                            "volume": _json_num(r[5]),
-                        }
-                    )
-                return result
+                cur.execute(sql, params)
+                return [
+                    {
+                        "timestamp": r[0],
+                        "open": r[1],
+                        "high": r[2],
+                        "low": r[3],
+                        "close": r[4],
+                        "volume": r[5],
+                        "source": r[6],
+                    }
+                    for r in cur.fetchall()
+                ]
