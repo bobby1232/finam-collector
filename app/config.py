@@ -1,7 +1,6 @@
 import os
+from dataclasses import dataclass
 
-TICKER = os.getenv("TICKER", "GAZP@MISX").strip().upper()
-TIMEFRAME = os.getenv("TIMEFRAME", "TIME_FRAME_M1").strip().upper()
 FINAM_SECRET = os.getenv("FINAM_SECRET", "").strip()
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 PORT = int(os.getenv("PORT", "8080"))
@@ -36,9 +35,66 @@ HISTORY_DAYS = {
     "TIME_FRAME_QR": 365 * 5,
 }
 
-if TIMEFRAME not in TIMEFRAME_SECONDS:
-    raise RuntimeError(f"Unsupported TIMEFRAME: {TIMEFRAME}")
 
-# Poll no faster than 15 sec; for long candles this remains reasonably lightweight.
-POLL_SECONDS = int(os.getenv("POLL_SECONDS", str(max(15, min(TIMEFRAME_SECONDS[TIMEFRAME] // 2, 300)))))
-LOOKBACK_DAYS = int(os.getenv("LOOKBACK_DAYS", str(HISTORY_DAYS[TIMEFRAME])))
+@dataclass(frozen=True)
+class Instrument:
+    symbol: str
+    timeframe: str
+
+    @property
+    def history_days(self) -> int:
+        return HISTORY_DAYS[self.timeframe]
+
+
+def parse_instruments() -> list[Instrument]:
+    """
+    INSTRUMENTS format:
+      GAZP@MISX:TIME_FRAME_M1,SiZ6@RTSX:TIME_FRAME_M1
+
+    Symbol case is preserved intentionally: futures tickers in Finam may be mixed-case.
+    Falls back to legacy TICKER/TIMEFRAME variables when INSTRUMENTS is absent.
+    """
+    raw = os.getenv("INSTRUMENTS", "").strip()
+
+    if not raw:
+        ticker = os.getenv("TICKER", "GAZP@MISX").strip()
+        timeframe = os.getenv("TIMEFRAME", "TIME_FRAME_M1").strip().upper()
+        raw = f"{ticker}:{timeframe}"
+
+    result: list[Instrument] = []
+    seen: set[tuple[str, str]] = set()
+
+    for item in raw.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        try:
+            symbol, timeframe = item.rsplit(":", 1)
+        except ValueError as exc:
+            raise RuntimeError(
+                f"Invalid INSTRUMENTS item: {item!r}. Expected SYMBOL:TIMEFRAME"
+            ) from exc
+
+        symbol = symbol.strip()
+        timeframe = timeframe.strip().upper()
+
+        if not symbol or "@" not in symbol:
+            raise RuntimeError(f"Invalid Finam symbol: {symbol!r}; expected ticker@mic")
+        if timeframe not in TIMEFRAME_SECONDS:
+            raise RuntimeError(f"Unsupported TIMEFRAME: {timeframe}")
+
+        key = (symbol, timeframe)
+        if key not in seen:
+            seen.add(key)
+            result.append(Instrument(symbol=symbol, timeframe=timeframe))
+
+    if not result:
+        raise RuntimeError("INSTRUMENTS is empty")
+
+    return result
+
+
+INSTRUMENTS = parse_instruments()
+
+# How often the worker checks Finam. Current/unfinished candle is refreshed via UPSERT.
+POLL_SECONDS = max(15, int(os.getenv("POLL_SECONDS", "30")))
