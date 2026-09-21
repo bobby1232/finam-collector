@@ -36,6 +36,7 @@ state = {
 
 FINAM_LIVE_SYMBOLS = {
     "BR@CONT": "BRV6@RTSX",
+    "SI@CONT": "SiZ6@RTSX",
 }
 
 
