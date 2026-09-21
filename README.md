@@ -1,35 +1,53 @@
 # Finam Quotes Collector
 
-Small Railway service that polls Finam Trade API candles and stores them in PostgreSQL.
+Railway-ready collector for Finam Trade API bars -> PostgreSQL.
 
-## Required variables
+## Configuration
 
-- `FINAM_SECRET` — Finam Trade API secret token.
-- `DATABASE_URL` — PostgreSQL connection string.
-- `TICKER` — instrument in `ticker@mic` format, e.g. `GAZP@MISX`.
-- `TIMEFRAME` — e.g. `TIME_FRAME_M1`, `TIME_FRAME_M5`, `TIME_FRAME_H1`, `TIME_FRAME_D`.
+Required:
 
-Optional:
-- `POLL_SECONDS` — polling frequency. If omitted, chosen automatically from timeframe.
-- `LOOKBACK_DAYS` — initial history depth. Defaults to the maximum documented Finam history depth for the selected timeframe.
+```env
+FINAM_SECRET=...
+DATABASE_URL=${{Postgres.DATABASE_URL}}
+```
 
-## Database
+Instruments are configured in one variable:
 
-Table `candles` is created automatically. Primary key is `(ticker, timeframe, ts)`.
-The current candle can be requested repeatedly: `ON CONFLICT ... DO UPDATE` updates it rather than creating duplicates.
+```env
+INSTRUMENTS=GAZP@MISX:TIME_FRAME_M1,SiZ6@RTSX:TIME_FRAME_M1
+POLL_SECONDS=30
+```
+
+`SiZ6` is the MOEX Si-12.26 USD/RUB futures contract, expiration 2026-12-17.
+
+Supported timeframes:
+`TIME_FRAME_M1`, `M5`, `M15`, `M30`, `H1`, `H2`, `H4`, `H8`, `D`, `W`, `MN`, `QR` (with the `TIME_FRAME_` prefix).
+
+## Storage
+
+Table `candles`:
+
+- `ticker`
+- `timeframe`
+- `ts`
+- `open`
+- `high`
+- `low`
+- `close`
+- `volume` — volume returned by Finam for the bar
+- `updated_at`
+
+Primary key: `(ticker, timeframe, ts)`. Recent/incomplete candles are refreshed using UPSERT.
 
 ## Endpoints
 
 - `GET /health`
-- `GET /stats`
+- `GET /stats` — includes volume completeness counters
+- `GET /bars?symbol=SiZ6@RTSX&timeframe=TIME_FRAME_M1&limit=20`
 
 ## Local run
 
 ```bash
 pip install -r requirements.txt
-export FINAM_SECRET='...'
-export DATABASE_URL='postgresql://...'
-export TICKER='GAZP@MISX'
-export TIMEFRAME='TIME_FRAME_M1'
-uvicorn app.main:app --reload
+uvicorn app.main:app --host 0.0.0.0 --port 8080
 ```
