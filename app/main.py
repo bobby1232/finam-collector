@@ -3,9 +3,9 @@ import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Query
 
-from .config import DATABASE_URL, FINAM_SECRET, LOOKBACK_DAYS, POLL_SECONDS, TICKER, TIMEFRAME
+from .config import DATABASE_URL, FINAM_SECRET, INSTRUMENTS, POLL_SECONDS
 from .db import Database
 from .finam import FinamClient
 
@@ -13,14 +13,62 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 log = logging.getLogger("finam-collector")
 
 state = {
-    "last_sync": None,
-    "last_error": None,
-    "last_received": 0,
+    "last_cycle": None,
+    "instruments": {},
 }
 
 
-def sync_db(db: Database, ticker: str, timeframe: str, bars):
-    return db.upsert_bars(ticker, timeframe, bars)
+def key(symbol: str, timeframe: str) -> str:
+    return f"{symbol}|{timeframe}"
+
+
+async def sync_one(db: Database, finam: FinamClient, symbol: str, timeframe: str, history_days: int):
+    now = datetime.now(timezone.utc)
+    latest = await asyncio.to_thread(db.latest_timestamp, symbol, timeframe)
+
+    if latest is None:
+        start = now - timedelta(days=history_days)
+    else:
+        # Re-read overlap to keep the currently-forming candle and recent bars fresh.
+        start = latest - timedelta(hours=1)
+
+    bars = await finam.bars(symbol, timeframe, start, now + timedelta(seconds=1))
+    written = await asyncio.to_thread(db.upsert_bars, symbol, timeframe, bars)
+
+    # Explicitly inspect the payload for volume; this catches API/schema surprises early.
+    volume_present = sum(1 for b in bars if b.get("volume") is not None)
+    volume_positive = 0
+    for b in bars:
+        v = b.get("volume")
+        if isinstance(v, dict):
+            v = v.get("value")
+        try:
+            if v is not None and float(v) > 0:
+                volume_positive += 1
+        except (TypeError, ValueError):
+            pass
+
+    result = {
+        "symbol": symbol,
+        "timeframe": timeframe,
+        "last_sync": now.isoformat(),
+        "received": len(bars),
+        "written": written,
+        "payload_rows_with_volume": volume_present,
+        "payload_rows_with_positive_volume": volume_positive,
+        "last_error": None,
+    }
+    state["instruments"][key(symbol, timeframe)] = result
+    log.info(
+        "Synced %s %s: bars=%s volume_present=%s volume_positive=%s range=%s..%s",
+        symbol,
+        timeframe,
+        len(bars),
+        volume_present,
+        volume_positive,
+        start.isoformat(),
+        now.isoformat(),
+    )
 
 
 async def collector_loop():
@@ -28,33 +76,35 @@ async def collector_loop():
     await asyncio.to_thread(db.init_schema)
     finam = FinamClient(FINAM_SECRET)
 
-    log.info("Collector started ticker=%s timeframe=%s poll=%ss", TICKER, TIMEFRAME, POLL_SECONDS)
+    log.info(
+        "Collector started instruments=%s poll=%ss",
+        [f"{x.symbol}:{x.timeframe}" for x in INSTRUMENTS],
+        POLL_SECONDS,
+    )
 
     try:
         while True:
-            try:
-                now = datetime.now(timezone.utc)
-                latest = await asyncio.to_thread(db.latest_timestamp, TICKER, TIMEFRAME)
+            for instrument in INSTRUMENTS:
+                try:
+                    await sync_one(
+                        db,
+                        finam,
+                        instrument.symbol,
+                        instrument.timeframe,
+                        instrument.history_days,
+                    )
+                except Exception as exc:
+                    k = key(instrument.symbol, instrument.timeframe)
+                    previous = state["instruments"].get(k, {})
+                    state["instruments"][k] = {
+                        **previous,
+                        "symbol": instrument.symbol,
+                        "timeframe": instrument.timeframe,
+                        "last_error": repr(exc),
+                    }
+                    log.exception("Sync failed symbol=%s timeframe=%s", instrument.symbol, instrument.timeframe)
 
-                # First run: bootstrap history. Later runs: re-read a small overlap so
-                # the currently forming candle is updated by UPSERT.
-                if latest is None:
-                    start = now - timedelta(days=LOOKBACK_DAYS)
-                else:
-                    overlap = timedelta(seconds=max(POLL_SECONDS * 4, 3600))
-                    start = latest - overlap
-
-                bars = await finam.bars(TICKER, TIMEFRAME, start, now + timedelta(seconds=1))
-                written = await asyncio.to_thread(sync_db, db, TICKER, TIMEFRAME, bars)
-
-                state["last_sync"] = now.isoformat()
-                state["last_received"] = written
-                state["last_error"] = None
-                log.info("Synced %s bars; range=%s..%s", written, start.isoformat(), now.isoformat())
-            except Exception as exc:
-                state["last_error"] = repr(exc)
-                log.exception("Sync failed")
-
+            state["last_cycle"] = datetime.now(timezone.utc).isoformat()
             await asyncio.sleep(POLL_SECONDS)
     finally:
         await finam.close()
@@ -76,11 +126,13 @@ app = FastAPI(title="Finam Quotes Collector", lifespan=lifespan)
 
 @app.get("/health")
 def health():
+    errors = [v for v in state["instruments"].values() if v.get("last_error")]
     return {
-        "status": "ok" if not state["last_error"] else "degraded",
-        "ticker": TICKER,
-        "timeframe": TIMEFRAME,
+        "status": "degraded" if errors else "ok",
         "poll_seconds": POLL_SECONDS,
+        "configured_instruments": [
+            {"symbol": x.symbol, "timeframe": x.timeframe} for x in INSTRUMENTS
+        ],
         **state,
     }
 
@@ -88,12 +140,30 @@ def health():
 @app.get("/stats")
 async def stats():
     db = Database(DATABASE_URL)
-    count = await asyncio.to_thread(db.count, TICKER, TIMEFRAME)
-    latest = await asyncio.to_thread(db.latest_timestamp, TICKER, TIMEFRAME)
-    return {
-        "ticker": TICKER,
-        "timeframe": TIMEFRAME,
-        "rows": count,
-        "latest_timestamp": latest,
-        **state,
-    }
+    result = []
+    for instrument in INSTRUMENTS:
+        db_stats = await asyncio.to_thread(db.stats, instrument.symbol, instrument.timeframe)
+        runtime = state["instruments"].get(key(instrument.symbol, instrument.timeframe), {})
+        result.append({
+            "symbol": instrument.symbol,
+            "timeframe": instrument.timeframe,
+            **db_stats,
+            "runtime": runtime,
+        })
+    return {"instruments": result, "last_cycle": state["last_cycle"]}
+
+
+@app.get("/bars")
+async def bars(
+    symbol: str = Query(...),
+    timeframe: str = Query(...),
+    limit: int = Query(10, ge=1, le=500),
+):
+    configured = {(x.symbol, x.timeframe) for x in INSTRUMENTS}
+    timeframe = timeframe.upper()
+    if (symbol, timeframe) not in configured:
+        raise HTTPException(status_code=404, detail="Instrument/timeframe is not configured")
+
+    db = Database(DATABASE_URL)
+    rows = await asyncio.to_thread(db.recent_bars, symbol, timeframe, limit)
+    return {"symbol": symbol, "timeframe": timeframe, "bars": rows}
