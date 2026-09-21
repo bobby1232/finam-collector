@@ -27,13 +27,11 @@ async def sync_one(db: Database, finam: FinamClient, symbol: str, timeframe: str
     latest = await asyncio.to_thread(db.latest_timestamp, symbol, timeframe)
 
     if latest is None:
-        start = now - timedelta(days=history_days)
-    else:
+        # Stay slightly inside Finam's maximum history window.\n        # Asking for exactly the documented limit can become invalid by the time\n        # the request is processed, especially for M1 (7 days).\n        start = now - timedelta(days=history_days) + timedelta(minutes=5)\n    else:
         # Re-read overlap to keep the currently-forming candle and recent bars fresh.
         start = latest - timedelta(hours=1)
 
-    bars = await finam.bars(symbol, timeframe, start, now + timedelta(seconds=1))
-    written = await asyncio.to_thread(db.upsert_bars, symbol, timeframe, bars)
+    bars = await finam.bars(symbol, timeframe, start, now)\n    written = await asyncio.to_thread(db.upsert_bars, symbol, timeframe, bars)
 
     # Explicitly inspect the payload for volume; this catches API/schema surprises early.
     volume_present = sum(1 for b in bars if b.get("volume") is not None)
