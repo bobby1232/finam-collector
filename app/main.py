@@ -12,6 +12,7 @@ from .config import DATABASE_URL, FINAM_SECRET, INSTRUMENTS, POLL_SECONDS
 from .db import Database, INTERVALS
 from .finam import FinamClient
 from .moex import MoexClient
+from .analysis import build_si_analysis
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("finam-collector")
@@ -312,3 +313,9 @@ async def bars(
     db = Database(DATABASE_URL)
     rows = await asyncio.to_thread(db.recent_bars, symbol, timeframe, limit)
     return {"symbol": symbol, "timeframe": timeframe, "bars": rows}
+
+
+@app.get("/api/analysis/si")
+async def si_analysis():
+    db = Database(DATABASE_URL)
+    return await asyncio.to_thread(build_si_analysis, db, "SI@CONT")
