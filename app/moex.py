@@ -36,6 +36,20 @@ def si_front_secid(day: date) -> str:
     return "SiZ6"
 
 
+SI_FRONT = (
+    (date(2026, 6, 18), "SiM6"),
+    (date(2026, 9, 17), "SiU6"),
+    (date(2026, 12, 17), "SiZ6"),
+)
+
+
+def si_front_secid(day: date) -> str:
+    for expiry, secid in SI_FRONT:
+        if day <= expiry:
+            return secid
+    return "SiZ6"
+
+
 BRENT_FRONT = (
     (date(2026, 6, 1), "BRM6"),
     (date(2026, 7, 1), "BRN6"),
