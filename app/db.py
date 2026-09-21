@@ -24,6 +24,12 @@ ALTER TABLE candles ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'finam
 
 CREATE INDEX IF NOT EXISTS idx_candles_ticker_tf_ts
 ON candles (ticker, timeframe, ts DESC);
+
+CREATE TABLE IF NOT EXISTS backfill_status (
+    ticker TEXT PRIMARY KEY,
+    completed_through DATE NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 """
 
 UPSERT_SQL = """
@@ -105,6 +111,32 @@ class Database:
                     (ticker, timeframe),
                 )
                 return cur.fetchone()[0]
+
+    def backfill_completed_through(self, ticker: str):
+        with psycopg.connect(self.url) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT completed_through FROM backfill_status WHERE ticker=%s",
+                    (ticker,),
+                )
+                row = cur.fetchone()
+                return row[0] if row else None
+
+    def mark_backfill_completed(self, ticker: str, completed_through) -> None:
+        with psycopg.connect(self.url) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO backfill_status (ticker, completed_through, updated_at)
+                    VALUES (%s, %s, NOW())
+                    ON CONFLICT (ticker)
+                    DO UPDATE SET
+                        completed_through = EXCLUDED.completed_through,
+                        updated_at = NOW()
+                    """,
+                    (ticker, completed_through),
+                )
+            conn.commit()
 
     def stats(self, ticker: str, timeframe: str) -> dict[str, Any]:
         with psycopg.connect(self.url) as conn:
