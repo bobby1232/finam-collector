@@ -1,5 +1,5 @@
 import asyncio
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -16,54 +16,66 @@ MOEX_INSTRUMENTS = {
         "url": "https://iss.moex.com/iss/engines/stock/markets/shares/boards/TQBR/securities/ROSN/candles.json",
         "secid": "ROSN",
     },
+    "SBER@MISX": {
+        "url": "https://iss.moex.com/iss/engines/stock/markets/shares/boards/TQBR/securities/SBER/candles.json",
+        "secid": "SBER",
+    },
+    "GMKN@MISX": {
+        "url": "https://iss.moex.com/iss/engines/stock/markets/shares/boards/TQBR/securities/GMKN/candles.json",
+        "secid": "GMKN",
+    },
     "SiZ6@RTSX": {
         "url": "https://iss.moex.com/iss/engines/futures/markets/forts/securities/SiZ6/candles.json",
         "secid": "SiZ6",
     },
 }
 
-SI_FRONT = (
-    (date(2026, 6, 18), "SiM6"),
-    (date(2026, 9, 17), "SiU6"),
-    (date(2026, 12, 17), "SiZ6"),
-)
+MONTH_CODES = {
+    1: "F",
+    2: "G",
+    3: "H",
+    4: "J",
+    5: "K",
+    6: "M",
+    7: "N",
+    8: "Q",
+    9: "U",
+    10: "V",
+    11: "X",
+    12: "Z",
+}
 
 
-def si_front_secid(day: date) -> str:
-    for expiry, secid in SI_FRONT:
-        if day <= expiry:
-            return secid
-    return "SiZ6"
+def _contract_secid(prefix: str, year: int, month: int) -> str:
+    return f"{prefix}{MONTH_CODES[month]}{year % 10}"
 
 
-SI_FRONT = (
-    (date(2026, 6, 18), "SiM6"),
-    (date(2026, 9, 17), "SiU6"),
-    (date(2026, 12, 17), "SiZ6"),
-)
+def _next_month(year: int, month: int) -> tuple[int, int]:
+    if month == 12:
+        return year + 1, 1
+    return year, month + 1
 
 
-def si_front_secid(day: date) -> str:
-    for expiry, secid in SI_FRONT:
-        if day <= expiry:
-            return secid
-    return "SiZ6"
+def brent_candidate_secids(day: date) -> tuple[str, str]:
+    current = _contract_secid("BR", day.year, day.month)
+    next_year, next_month = _next_month(day.year, day.month)
+    following = _contract_secid("BR", next_year, next_month)
+    return current, following
 
 
-BRENT_FRONT = (
-    (date(2026, 6, 1), "BRM6"),
-    (date(2026, 7, 1), "BRN6"),
-    (date(2026, 8, 3), "BRQ6"),
-    (date(2026, 8, 31), "BRU6"),
-    (date(2026, 10, 1), "BRV6"),
-)
+def si_candidate_secids(day: date) -> tuple[str, str]:
+    quarter_months = (3, 6, 9, 12)
+    current_month = next(m for m in quarter_months if m >= day.month)
+    current_year = day.year
 
+    if current_month == 12:
+        next_year, next_q_month = current_year + 1, 3
+    else:
+        next_year, next_q_month = current_year, current_month + 3
 
-def brent_front_secid(day: date) -> str:
-    for expiry, secid in BRENT_FRONT:
-        if day <= expiry:
-            return secid
-    return "BRV6"
+    current = _contract_secid("Si", current_year, current_month)
+    following = _contract_secid("Si", next_year, next_q_month)
+    return current, following
 
 
 class MoexClient:
@@ -76,35 +88,19 @@ class MoexClient:
     async def close(self) -> None:
         await self.client.aclose()
 
-    async def minute_bars(
+    async def _fetch(
         self,
+        url: str,
         symbol: str,
         date_from: date,
-        date_to: date | None = None,
+        date_to: date,
     ) -> list[dict[str, Any]]:
-        date_to = date_to or date_from
-        if symbol in {"BR@CONT", "SI@CONT"}:
-            if date_to != date_from:
-                raise RuntimeError(f"{symbol} backfill expects one calendar day per request")
-            secid = brent_front_secid(date_from) if symbol == "BR@CONT" else si_front_secid(date_from)
-            cfg = {
-                "url": (
-                    "https://iss.moex.com/iss/engines/futures/markets/forts/"
-                    f"securities/{secid}/candles.json"
-                ),
-                "secid": secid,
-            }
-        else:
-            cfg = MOEX_INSTRUMENTS.get(symbol)
-            if not cfg:
-                raise RuntimeError(f"No MOEX backfill mapping for {symbol}")
-
         result: list[dict[str, Any]] = []
         start = 0
 
         while True:
             response = await self.client.get(
-                cfg["url"],
+                url,
                 params={
                     "from": date_from.isoformat(),
                     "till": date_to.isoformat(),
@@ -114,7 +110,10 @@ class MoexClient:
                     "iss.only": "candles",
                 },
             )
+            if response.status_code == 404:
+                return []
             response.raise_for_status()
+
             payload = response.json().get("candles", {})
             columns = payload.get("columns", [])
             data = payload.get("data", [])
@@ -152,16 +151,66 @@ class MoexClient:
 
         return result
 
-    async def range_minute_bars(
+    @staticmethod
+    def _volume_score(bars: list[dict[str, Any]]) -> float:
+        score = 0.0
+        for bar in bars:
+            try:
+                score += float(bar.get("volume") or 0)
+            except (TypeError, ValueError):
+                pass
+        return score
+
+    async def _continuous_day(
+        self,
+        symbol: str,
+        day: date,
+        candidates: tuple[str, str],
+    ) -> list[dict[str, Any]]:
+        best_bars: list[dict[str, Any]] = []
+        best_score = -1.0
+
+        for secid in candidates:
+            url = (
+                "https://iss.moex.com/iss/engines/futures/markets/forts/"
+                f"securities/{secid}/candles.json"
+            )
+            bars = await self._fetch(url, f"{symbol}/{secid}", day, day)
+            score = self._volume_score(bars)
+            if bars and score > best_score:
+                best_bars = bars
+                best_score = score
+
+        return best_bars
+
+    async def minute_bars(
         self,
         symbol: str,
         date_from: date,
-        date_to: date,
-        chunk_days: int = 7,
-    ):
-        cursor = date_from
-        while cursor <= date_to:
-            chunk_end = min(cursor + timedelta(days=chunk_days - 1), date_to)
-            bars = await self.minute_bars(symbol, cursor, chunk_end)
-            yield cursor, chunk_end, bars
-            cursor = chunk_end + timedelta(days=1)
+        date_to: date | None = None,
+    ) -> list[dict[str, Any]]:
+        date_to = date_to or date_from
+
+        if symbol == "BR@CONT":
+            if date_to != date_from:
+                raise RuntimeError("BR@CONT backfill expects one calendar day per request")
+            return await self._continuous_day(
+                symbol,
+                date_from,
+                brent_candidate_secids(date_from),
+            )
+
+        if symbol == "SI@CONT":
+            if date_to != date_from:
+                raise RuntimeError("SI@CONT backfill expects one calendar day per request")
+            return await self._continuous_day(
+                symbol,
+                date_from,
+                si_candidate_secids(date_from),
+            )
+
+        cfg = MOEX_INSTRUMENTS.get(symbol)
+        if not cfg:
+            raise RuntimeError(f"No MOEX backfill mapping for {symbol}")
+
+        return await self._fetch(cfg["url"], symbol, date_from, date_to)
