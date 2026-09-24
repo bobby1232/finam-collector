@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -12,7 +13,7 @@ from .config import DATABASE_URL, FINAM_SECRET, INSTRUMENTS, POLL_SECONDS
 from .db import Database, INTERVALS
 from .finam import FinamClient
 from .moex import MoexClient
-from .analysis import build_si_analysis
+from .analysis import build_si_analysis, build_technical_snapshot
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("finam-collector")
@@ -247,14 +248,25 @@ async def backfill_loop():
         await moex.close()
 
 
+async def log_gmkn_snapshot_once():
+    await asyncio.sleep(6)
+    try:
+        db = Database(DATABASE_URL)
+        snapshot = await asyncio.to_thread(build_technical_snapshot, db, "GMKN@MISX")
+        log.info("GMKN_TECH_SNAPSHOT %s", json.dumps(snapshot, ensure_ascii=False, default=str))
+    except Exception:
+        log.exception("GMKN technical snapshot failed")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     db = Database(DATABASE_URL)
     await asyncio.to_thread(db.init_schema)
     collector = asyncio.create_task(collector_loop())
     backfill = asyncio.create_task(backfill_loop())
+    gmkn_snapshot = asyncio.create_task(log_gmkn_snapshot_once())
     yield
-    for task in (collector, backfill):
+    for task in (collector, backfill, gmkn_snapshot):
         task.cancel()
         try:
             await task
