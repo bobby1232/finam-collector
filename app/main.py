@@ -141,11 +141,9 @@ async def backfill_loop():
                 continue
 
             completed = await asyncio.to_thread(
-                db.backfill_completed_through, instrument.symbol
+                db.ensure_backfill_window, instrument.symbol, start_date
             )
-            day = start_date if completed is None else max(
-                start_date, completed + timedelta(days=1)
-            )
+            day = max(start_date, completed + timedelta(days=1))
 
             while day <= cutoff:
                 state["backfill"]["current"] = f"{instrument.symbol} {day.isoformat()}"
@@ -163,7 +161,7 @@ async def backfill_loop():
 
                     # Checkpoint every successfully processed calendar day, including weekends.
                     await asyncio.to_thread(
-                        db.mark_backfill_completed, instrument.symbol, day
+                        db.mark_backfill_completed, instrument.symbol, start_date, day
                     )
                     state["backfill"]["days_done"] += 1
                     state["backfill"]["last_error"] = None
