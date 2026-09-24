@@ -19,6 +19,7 @@ log = logging.getLogger("finam-collector")
 
 BACKFILL_FROM = os.getenv("BACKFILL_FROM", "2026-06-01").strip()
 BACKFILL_ENABLED = os.getenv("BACKFILL_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
+BACKFILL_CONCURRENCY = max(1, min(int(os.getenv("BACKFILL_CONCURRENCY", "3")), 5))
 
 state = {
     "last_cycle": None,
@@ -31,6 +32,7 @@ state = {
         "days_done": 0,
         "rows_written": 0,
         "last_error": None,
+        "instruments": {},
     },
 }
 
@@ -124,6 +126,80 @@ async def collector_loop():
         await finam.close()
 
 
+async def backfill_instrument(
+    db: Database,
+    moex: MoexClient,
+    instrument,
+    start_date,
+    cutoff,
+    semaphore: asyncio.Semaphore,
+) -> bool:
+    symbol = instrument.symbol
+    progress = {
+        "status": "running",
+        "current": None,
+        "days_done": 0,
+        "rows_written": 0,
+        "last_error": None,
+    }
+    state["backfill"]["instruments"][symbol] = progress
+
+    completed = await asyncio.to_thread(
+        db.ensure_backfill_window, symbol, start_date
+    )
+    day = max(start_date, completed + timedelta(days=1))
+
+    try:
+        while day <= cutoff:
+            progress["current"] = day.isoformat()
+
+            active = [
+                f"{name} {item.get('current')}"
+                for name, item in state["backfill"]["instruments"].items()
+                if item.get("status") == "running" and item.get("current")
+            ]
+            state["backfill"]["current"] = " | ".join(active[:4])
+
+            async with semaphore:
+                bars = await moex.minute_bars(symbol, day)
+
+            if bars:
+                written = await asyncio.to_thread(
+                    db.upsert_bars,
+                    symbol,
+                    instrument.timeframe,
+                    bars,
+                    "moex",
+                )
+                progress["rows_written"] += written
+                state["backfill"]["rows_written"] += written
+
+            # Checkpoint every successfully processed calendar day, including weekends.
+            await asyncio.to_thread(
+                db.mark_backfill_completed, symbol, start_date, day
+            )
+            progress["days_done"] += 1
+            state["backfill"]["days_done"] += 1
+            progress["last_error"] = None
+            day += timedelta(days=1)
+            await asyncio.sleep(0.03)
+
+        progress["status"] = "done"
+        progress["current"] = None
+        log.info(
+            "Backfill completed symbol=%s rows_written=%s",
+            symbol,
+            progress["rows_written"],
+        )
+        return True
+    except Exception as exc:
+        progress["status"] = "error"
+        progress["last_error"] = repr(exc)
+        state["backfill"]["last_error"] = f"{symbol}: {exc!r}"
+        log.exception("Backfill failed symbol=%s day=%s", symbol, day)
+        return False
+
+
 async def backfill_loop():
     if not BACKFILL_ENABLED:
         return
@@ -135,53 +211,37 @@ async def backfill_loop():
         # FINAM owns the most recent 7 days; MOEX is used only for the deep-history gap.
         cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).date()
         state["backfill"]["status"] = "running"
+        state["backfill"]["instruments"] = {}
+        semaphore = asyncio.Semaphore(BACKFILL_CONCURRENCY)
 
-        for instrument in INSTRUMENTS:
-            if instrument.timeframe != "TIME_FRAME_M1":
-                continue
+        instruments = [
+            instrument
+            for instrument in INSTRUMENTS
+            if instrument.timeframe == "TIME_FRAME_M1"
+        ]
 
-            completed = await asyncio.to_thread(
-                db.ensure_backfill_window, instrument.symbol, start_date
-            )
-            day = max(start_date, completed + timedelta(days=1))
-
-            while day <= cutoff:
-                state["backfill"]["current"] = f"{instrument.symbol} {day.isoformat()}"
-                try:
-                    bars = await moex.minute_bars(instrument.symbol, day)
-                    if bars:
-                        written = await asyncio.to_thread(
-                            db.upsert_bars,
-                            instrument.symbol,
-                            instrument.timeframe,
-                            bars,
-                            "moex",
-                        )
-                        state["backfill"]["rows_written"] += written
-
-                    # Checkpoint every successfully processed calendar day, including weekends.
-                    await asyncio.to_thread(
-                        db.mark_backfill_completed, instrument.symbol, start_date, day
-                    )
-                    state["backfill"]["days_done"] += 1
-                    state["backfill"]["last_error"] = None
-                    day += timedelta(days=1)
-                    await asyncio.sleep(0.05)
-                except Exception as exc:
-                    state["backfill"]["last_error"] = repr(exc)
-                    state["backfill"]["status"] = "error"
-                    log.exception(
-                        "Backfill failed symbol=%s day=%s",
-                        instrument.symbol,
-                        day,
-                    )
-                    return
+        results = await asyncio.gather(
+            *[
+                backfill_instrument(
+                    db,
+                    moex,
+                    instrument,
+                    start_date,
+                    cutoff,
+                    semaphore,
+                )
+                for instrument in instruments
+            ],
+            return_exceptions=False,
+        )
 
         state["backfill"]["current"] = None
-        state["backfill"]["status"] = "done"
+        state["backfill"]["status"] = "done" if all(results) else "partial_error"
         log.info(
-            "Backfill completed rows_written=%s",
+            "Backfill finished status=%s rows_written=%s concurrency=%s",
+            state["backfill"]["status"],
             state["backfill"]["rows_written"],
+            BACKFILL_CONCURRENCY,
         )
     finally:
         await moex.close()
