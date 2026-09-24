@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -146,7 +146,7 @@ class Database:
                 if row and row[0] == backfill_from:
                     return row[1]
 
-                checkpoint = backfill_from - __import__("datetime").timedelta(days=1)
+                checkpoint = backfill_from - timedelta(days=1)
                 cur.execute(
                     """
                     INSERT INTO backfill_status
