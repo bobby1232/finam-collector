@@ -99,20 +99,40 @@ class MoexClient:
         start = 0
 
         while True:
-            response = await self.client.get(
-                url,
-                params={
-                    "from": date_from.isoformat(),
-                    "till": date_to.isoformat(),
-                    "interval": 1,
-                    "start": start,
-                    "iss.meta": "off",
-                    "iss.only": "candles",
-                },
-            )
-            if response.status_code == 404:
-                return []
-            response.raise_for_status()
+            response = None
+            last_error: Exception | None = None
+            for attempt in range(5):
+                try:
+                    response = await self.client.get(
+                        url,
+                        params={
+                            "from": date_from.isoformat(),
+                            "till": date_to.isoformat(),
+                            "interval": 1,
+                            "start": start,
+                            "iss.meta": "off",
+                            "iss.only": "candles",
+                        },
+                    )
+                    if response.status_code == 404:
+                        return []
+                    if response.status_code == 429 or response.status_code >= 500:
+                        raise httpx.HTTPStatusError(
+                            f"MOEX transient HTTP {response.status_code}",
+                            request=response.request,
+                            response=response,
+                        )
+                    response.raise_for_status()
+                    last_error = None
+                    break
+                except (httpx.RequestError, httpx.HTTPStatusError) as exc:
+                    last_error = exc
+                    if attempt == 4:
+                        raise
+                    await asyncio.sleep(min(5.0, 0.5 * (2 ** attempt)))
+
+            if response is None:
+                raise RuntimeError(f"MOEX request failed for {symbol}") from last_error
 
             payload = response.json().get("candles", {})
             columns = payload.get("columns", [])
