@@ -417,3 +417,84 @@ def build_technical_snapshot(db: Database, symbol: str) -> dict:
         },
         "sessions": last20,
     }
+
+
+def build_si_extended_snapshot(db: Database, symbol: str = "SI@CONT") -> dict:
+    """Current SI snapshot with price, volume, trend, momentum and nearby levels."""
+    now = datetime.now(timezone.utc)
+    start = now - timedelta(days=90)
+    bars15 = db.chart_bars(symbol, "TIME_FRAME_M1", start, now, 10000, "15m")
+    bars1h = db.chart_bars(symbol, "TIME_FRAME_M1", start, now, 10000, "1h")
+    if not bars15 or not bars1h:
+        return {"symbol": symbol, "error": "not enough data"}
+
+    c15 = [_f(x["close"]) for x in bars15]
+    c1h = [_f(x["close"]) for x in bars1h]
+    latest = bars15[-1]
+    latest_ts = latest["timestamp"]
+    current_day = latest_ts.date()
+    dates = sorted({b["timestamp"].date() for b in bars15})
+
+    def session_summary(xs):
+        if not xs:
+            return None
+        return {
+            "date": xs[0]["timestamp"].date().isoformat(),
+            "open": _f(xs[0]["open"]),
+            "high": max(_f(x["high"]) for x in xs),
+            "low": min(_f(x["low"]) for x in xs),
+            "close": _f(xs[-1]["close"]),
+            "volume": sum(_f(x["volume"]) or 0.0 for x in xs),
+        }
+
+    sessions = []
+    for d in dates[-30:]:
+        s = session_summary([b for b in bars15 if b["timestamp"].date() == d])
+        if s:
+            sessions.append(s)
+    today = session_summary([b for b in bars15 if b["timestamp"].date() == current_day])
+    completed = [s for s in sessions if s["date"] != current_day.isoformat()]
+    avg20v = sum(s["volume"] for s in completed[-20:]) / len(completed[-20:]) if completed else None
+    avg5v = sum(s["volume"] for s in completed[-5:]) / len(completed[-5:]) if completed else None
+    px = _f(latest["close"])
+
+    def trend(vals, bars):
+        e20, e50, e200 = ema(vals,20), ema(vals,50), ema(vals,200)
+        return {
+            "rsi14": rsi(vals,14), "ema20":e20, "ema50":e50, "ema200":e200,
+            "atr14": atr(bars,14),
+            "price_vs_ema20_pct": ((px/e20)-1)*100 if px and e20 else None,
+            "price_vs_ema50_pct": ((px/e50)-1)*100 if px and e50 else None,
+            "price_vs_ema200_pct": ((px/e200)-1)*100 if px and e200 else None,
+        }
+
+    last5=sessions[-5:]; last20=sessions[-20:]
+    recent15=bars15[-32:]
+    upvol=sum((_f(b["volume"]) or 0) for b in recent15 if _f(b["close"]) >= _f(b["open"]))
+    downvol=sum((_f(b["volume"]) or 0) for b in recent15 if _f(b["close"]) < _f(b["open"]))
+
+    return {
+        "symbol":symbol,"generated_at":now.isoformat(),
+        "latest":{"timestamp":latest_ts.isoformat(),"price":px,"volume_15m":_f(latest["volume"])},
+        "trend_15m":trend(c15,bars15),"trend_1h":trend(c1h,bars1h),
+        "today":today,
+        "previous_session":completed[-1] if completed else None,
+        "volume":{
+            "avg20_completed":avg20v,"avg5_completed":avg5v,
+            "today_vs_avg20": today["volume"]/avg20v if today and avg20v else None,
+            "today_vs_avg5": today["volume"]/avg5v if today and avg5v else None,
+            "last_32x15m_up_volume":upvol,"last_32x15m_down_volume":downvol,
+            "down_up_ratio":downvol/upvol if upvol else None,
+        },
+        "levels":{
+            "last5_high":max(s["high"] for s in last5) if last5 else None,
+            "last5_low":min(s["low"] for s in last5) if last5 else None,
+            "last20_high":max(s["high"] for s in last20) if last20 else None,
+            "last20_low":min(s["low"] for s in last20) if last20 else None,
+            "previous_high":completed[-1]["high"] if completed else None,
+            "previous_low":completed[-1]["low"] if completed else None,
+            "today_high":today["high"] if today else None,
+            "today_low":today["low"] if today else None,
+        },
+        "sessions":sessions[-10:],
+    }
