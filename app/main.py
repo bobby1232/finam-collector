@@ -259,7 +259,7 @@ async def log_gmkn_snapshot_once():
 
 
 async def log_si_snapshot_once():
-    await asyncio.sleep(8)
+    await asyncio.sleep(2)
     try:
         db = Database(DATABASE_URL)
         snapshot = await asyncio.to_thread(build_si_extended_snapshot, db, "SI@CONT")
