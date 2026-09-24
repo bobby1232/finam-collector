@@ -19,9 +19,9 @@ button{cursor:pointer;transition:.15s ease}button:hover{border-color:#44566d}but
 canvas{width:100%;display:block}.price{height:500px}.volume{height:170px}.study{height:230px}
 .row{display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:8px;flex-wrap:wrap}.status{font-size:12px;color:var(--muted)}.ok{color:var(--good)}
 .ta-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}.ta-title{display:flex;flex-direction:column;gap:3px}
-.ta-controls button{padding:7px 10px;font-size:12px}.divider{width:1px;height:24px;background:var(--line);margin:0 2px}
+.ta-controls button{padding:7px 10px;font-size:12px}.ta-control-item{display:inline-flex;align-items:center;gap:3px}.info-btn{width:27px;height:27px;padding:0!important;border-radius:50%;font-size:13px!important;color:var(--muted);display:inline-flex;align-items:center;justify-content:center}.info-btn:hover{color:var(--text);border-color:var(--accent)}.divider{width:1px;height:24px;background:var(--line);margin:0 2px}
 .legend{display:flex;gap:12px;flex-wrap:wrap;color:var(--muted);font-size:11px;margin-top:7px}.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px}
-.hidden{display:none}
+.hidden{display:none}.modal-backdrop{position:fixed;inset:0;background:rgba(3,7,12,.72);display:none;align-items:center;justify-content:center;padding:20px;z-index:1000;backdrop-filter:blur(4px)}.modal-backdrop.open{display:flex}.info-modal{width:min(560px,100%);background:#121821;border:1px solid #314055;border-radius:16px;box-shadow:0 24px 80px rgba(0,0,0,.45);overflow:hidden}.modal-head{display:flex;justify-content:space-between;gap:16px;align-items:center;padding:18px 20px;border-bottom:1px solid var(--line)}.modal-head h2{font-size:19px;margin:0}.modal-close{width:32px;height:32px;padding:0;border-radius:50%;font-size:18px}.modal-body{padding:20px}.modal-lead{font-size:16px;line-height:1.5;margin:0 0 16px}.explain-grid{display:grid;gap:12px}.explain-item{padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:#0f151d}.explain-item strong{display:block;font-size:12px;color:var(--accent);margin-bottom:5px;text-transform:uppercase;letter-spacing:.04em}.explain-item span{font-size:14px;line-height:1.45;color:#d7dee7}.modal-foot{padding:0 20px 20px;color:var(--muted);font-size:12px;line-height:1.45}
 @media(max-width:900px){.cards{grid-template-columns:repeat(2,1fr)}.ta-cards{grid-template-columns:repeat(2,1fr)}.price{height:380px}}
 @media(max-width:560px){.ta-cards{grid-template-columns:1fr}.wrap{padding:14px}}
 </style>
@@ -53,13 +53,13 @@ canvas{width:100%;display:block}.price{height:500px}.volume{height:170px}.study{
   <div class="ta-head">
     <div class="ta-title"><strong>Технический анализ</strong><span class="status">Индикаторы считаются по выбранному таймфрейму и видимому диапазону</span></div>
     <div class="ta-controls">
-      <button data-overlay="ema">EMA 20/50/200</button>
-      <button data-study="rsi">RSI 14</button>
-      <button data-study="macd">MACD</button>
-      <button data-overlay="bb">Bollinger 20/2</button>
-      <button data-study="atr">ATR 14</button>
-      <button data-overlay="vwap">VWAP</button>
-      <button data-study="adx">ADX 14</button>
+      <span class="ta-control-item"><button data-overlay="ema">EMA 20/50/200</button><button class="info-btn" data-info="ema" aria-label="Что такое EMA">ⓘ</button></span>
+      <span class="ta-control-item"><button data-study="rsi">RSI 14</button><button class="info-btn" data-info="rsi" aria-label="Что такое RSI">ⓘ</button></span>
+      <span class="ta-control-item"><button data-study="macd">MACD</button><button class="info-btn" data-info="macd" aria-label="Что такое MACD">ⓘ</button></span>
+      <span class="ta-control-item"><button data-overlay="bb">Bollinger 20/2</button><button class="info-btn" data-info="bb" aria-label="Что такое Bollinger Bands">ⓘ</button></span>
+      <span class="ta-control-item"><button data-study="atr">ATR 14</button><button class="info-btn" data-info="atr" aria-label="Что такое ATR">ⓘ</button></span>
+      <span class="ta-control-item"><button data-overlay="vwap">VWAP</button><button class="info-btn" data-info="vwap" aria-label="Что такое VWAP">ⓘ</button></span>
+      <span class="ta-control-item"><button data-study="adx">ADX 14</button><button class="info-btn" data-info="adx" aria-label="Что такое ADX">ⓘ</button></span>
       <span class="divider"></span>
       <button id="balancedPreset">Комплекс</button>
       <button id="clearIndicators">Сброс</button>
@@ -87,10 +87,80 @@ canvas{width:100%;display:block}.price{height:500px}.volume{height:170px}.study{
 <div class="panel"><div class="row"><strong>Объём</strong><span class="status" id="backfill"></span></div><canvas id="volume" class="volume"></canvas></div>
 </div>
 
+<div class="modal-backdrop" id="indicatorModal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+  <div class="info-modal">
+    <div class="modal-head">
+      <h2 id="modalTitle">Индикатор</h2>
+      <button class="modal-close" id="modalClose" aria-label="Закрыть">×</button>
+    </div>
+    <div class="modal-body">
+      <p class="modal-lead" id="modalLead"></p>
+      <div class="explain-grid">
+        <div class="explain-item"><strong>Как читать</strong><span id="modalRead"></span></div>
+        <div class="explain-item"><strong>Простой пример</strong><span id="modalExample"></span></div>
+        <div class="explain-item"><strong>Важно помнить</strong><span id="modalCaution"></span></div>
+      </div>
+    </div>
+    <div class="modal-foot">Индикатор описывает поведение цены или объёма. Сам по себе он не является прогнозом и не гарантирует результат сделки.</div>
+  </div>
+</div>
+
 <script>
 const $=id=>document.getElementById(id);
 let rangeDays=0,currentBars=[],historyStart=null,currentStudy='rsi';
 const activeOverlays=new Set(['ema']);
+
+const INDICATOR_HELP={
+  ema:{
+    title:'EMA 20 / 50 / 200',
+    lead:'EMA — это средняя цена, которая сильнее учитывает последние свечи. Она помогает быстро увидеть направление рынка.',
+    read:'EMA20 показывает короткий тренд, EMA50 — средний, EMA200 — долгий. Когда короткие EMA находятся выше длинных, рынок обычно выглядит сильнее; когда ниже — слабее.',
+    example:'Если цена 100, EMA20 = 99, EMA50 = 96, EMA200 = 90, последние цены в среднем растут быстрее долгосрочных.',
+    caution:'Пересечение EMA запаздывает за ценой. Во флэте линии могут часто пересекаться и давать много ложных сигналов.'
+  },
+  rsi:{
+    title:'RSI 14',
+    lead:'RSI показывает, насколько сильным было недавнее движение вверх или вниз. Шкала идёт от 0 до 100.',
+    read:'Обычно выше 70 называют верхней зоной, ниже 30 — нижней. Это не команды «продать» или «купить», а признак того, что движение стало очень сильным.',
+    example:'RSI = 78 означает, что в последних свечах рост заметно доминировал над снижением. Цена при этом может продолжить расти и дальше.',
+    caution:'На сильном тренде RSI способен долго оставаться выше 70 или ниже 30. Лучше смотреть его вместе с трендом и уровнями цены.'
+  },
+  macd:{
+    title:'MACD 12 / 26 / 9',
+    lead:'MACD сравнивает более быструю и более медленную среднюю цену и показывает, усиливается движение или слабеет.',
+    read:'Когда линия MACD выше сигнальной линии, краткосрочный импульс сильнее. Гистограмма показывает расстояние между ними: растущие столбики означают усиление импульса.',
+    example:'Цена растёт, MACD пересекает signal снизу вверх, а гистограмма увеличивается — ускорение роста стало заметнее.',
+    caution:'MACD тоже запаздывает. При боковом рынке пересечения могут происходить слишком часто и не иметь практической ценности.'
+  },
+  bb:{
+    title:'Bollinger Bands 20 / 2',
+    lead:'Полосы Боллинджера показывают обычный диапазон колебаний цены вокруг средней и то, насколько рынок сейчас спокойный или нервный.',
+    read:'Полосы расширяются при росте волатильности и сужаются при затишье. Касание верхней или нижней полосы само по себе не означает разворот.',
+    example:'После долгого узкого коридора полосы резко расширились — рынок перешёл из спокойного состояния в более активное.',
+    caution:'Цена может долго идти вдоль одной из полос в сильном тренде. Использовать касание полосы как самостоятельный сигнал рискованно.'
+  },
+  atr:{
+    title:'ATR 14',
+    lead:'ATR измеряет средний размер движения цены за свечу. Он отвечает на вопрос «насколько сильно сейчас ходит рынок», но не говорит направление.',
+    read:'Чем выше ATR, тем больше обычный диапазон движения. Удобно сравнивать ATR с самой ценой в процентах.',
+    example:'Цена акции 300 ₽, ATR = 6 ₽. Это примерно 2% цены: последние свечи в среднем двигаются заметно сильнее, чем при ATR = 2 ₽.',
+    caution:'Высокий ATR не означает падение, а низкий — рост. Это показатель риска и амплитуды, а не направления.'
+  },
+  vwap:{
+    title:'VWAP',
+    lead:'VWAP — средняя цена сделок с учётом объёма. Свечи с большим объёмом влияют на неё сильнее.',
+    read:'Цена выше VWAP означает, что она находится выше средней цены, взвешенной по объёму выбранного диапазона; ниже VWAP — наоборот.',
+    example:'Большая часть объёма прошла около 250 ₽, а текущая цена 260 ₽. Цена находится выше средней цены, по которой прошёл основной объём.',
+    caution:'У нас VWAP считается по выбранному на графике диапазону. При смене периода начальная точка расчёта меняется, поэтому меняется и VWAP.'
+  },
+  adx:{
+    title:'ADX 14',
+    lead:'ADX показывает силу тренда, но не его направление. Он помогает отличить выраженное движение от бокового рынка.',
+    read:'Условно ADX ниже 20–25 часто соответствует слабому тренду, выше 25 — более выраженному. Рост ADX означает усиление трендового движения.',
+    example:'ADX вырос с 17 до 32 — рынок стал более направленным. Чтобы понять вверх или вниз, нужно смотреть саму цену или другие трендовые показатели.',
+    caution:'Высокий ADX может быть и при сильном падении. Он не говорит «покупать» и не определяет направление тренда.'
+  }
+};
 
 const COLORS={
   ema20:'#73a7ff',ema50:'#f7c948',ema200:'#c084fc',
@@ -270,6 +340,22 @@ async function load(){
 function autoInterval(days){
   if(days===1)return'1m';if(days===7)return'5m';if(days===30)return'15m';if(days===365)return'1h';return'1d';
 }
+
+function openIndicatorInfo(key){
+  const x=INDICATOR_HELP[key];if(!x)return;
+  $('modalTitle').textContent=x.title;
+  $('modalLead').textContent=x.lead;
+  $('modalRead').textContent=x.read;
+  $('modalExample').textContent=x.example;
+  $('modalCaution').textContent=x.caution;
+  $('indicatorModal').classList.add('open');
+  document.body.style.overflow='hidden';
+}
+function closeIndicatorInfo(){
+  $('indicatorModal').classList.remove('open');
+  document.body.style.overflow='';
+}
+
 async function init(){
   try{const s=await(await fetch('/backfill/status')).json();historyStart=s.from||null;}catch(e){}
   const i=await(await fetch('/api/instruments')).json();i.instruments.forEach(x=>{const o=document.createElement('option');o.value=x.symbol;o.textContent=x.symbol.replace('@MISX','').replace('@RTSX','');$('instrument').appendChild(o)});
@@ -277,6 +363,10 @@ async function init(){
   document.querySelectorAll('[data-range]').forEach(b=>b.onclick=()=>{document.querySelectorAll('[data-range]').forEach(x=>x.classList.remove('active'));b.classList.add('active');rangeDays=+b.dataset.range;$('interval').value=autoInterval(rangeDays);load()});
   document.querySelectorAll('[data-overlay]').forEach(b=>b.onclick=()=>{const k=b.dataset.overlay;activeOverlays.has(k)?activeOverlays.delete(k):activeOverlays.add(k);renderAll()});
   document.querySelectorAll('[data-study]').forEach(b=>b.onclick=()=>{currentStudy=b.dataset.study;renderAll()});
+  document.querySelectorAll('[data-info]').forEach(b=>b.onclick=e=>{e.stopPropagation();openIndicatorInfo(b.dataset.info)});
+  $('modalClose').onclick=closeIndicatorInfo;
+  $('indicatorModal').onclick=e=>{if(e.target===$('indicatorModal'))closeIndicatorInfo()};
+  document.addEventListener('keydown',e=>{if(e.key==='Escape')closeIndicatorInfo()});
   $('balancedPreset').onclick=()=>{activeOverlays.clear();['ema','bb','vwap'].forEach(x=>activeOverlays.add(x));currentStudy='rsi';renderAll()};
   $('clearIndicators').onclick=()=>{activeOverlays.clear();currentStudy='rsi';renderAll()};
   setInterval(async()=>{try{const s=await(await fetch('/backfill/status')).json();historyStart=s.from||historyStart;const fromLabel=historyStart?new Date(historyStart+'T00:00:00').toLocaleDateString('ru-RU'):'—';$('backfill').textContent=s.status==='done'?'История с '+fromLabel+' загружена':'Backfill с '+fromLabel+': '+s.status+' · '+(s.current||'');$('backfill').className='status '+(s.status==='done'?'ok':'')}catch(e){}},3000);
