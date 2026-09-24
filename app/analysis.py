@@ -313,3 +313,107 @@ def build_si_analysis(db: Database, symbol: str = "SI@CONT") -> dict:
         "down_500": px - 500 if px else None,
     }
     return result
+
+
+def build_technical_snapshot(db: Database, symbol: str) -> dict:
+    """Lightweight technical snapshot for operational diagnostics."""
+    now = datetime.now(timezone.utc)
+    start = now - timedelta(days=60)
+    bars15 = db.chart_bars(symbol, "TIME_FRAME_M1", start, now, 10000, "15m")
+    bars1h = db.chart_bars(symbol, "TIME_FRAME_M1", start, now, 10000, "1h")
+    if not bars15 or not bars1h:
+        return {"symbol": symbol, "error": "not enough data"}
+
+    closes15 = [_f(x["close"]) for x in bars15]
+    closes1h = [_f(x["close"]) for x in bars1h]
+    latest = bars15[-1]
+    latest_ts = latest["timestamp"]
+    current_day = latest_ts.date()
+
+    dates = sorted({b["timestamp"].date() for b in bars15})
+    today_bars = [b for b in bars15 if b["timestamp"].date() == current_day]
+    prev_day = dates[-2] if len(dates) >= 2 else None
+    prev_bars = [b for b in bars15 if prev_day and b["timestamp"].date() == prev_day]
+
+    def session_summary(xs):
+        if not xs:
+            return None
+        return {
+            "date": xs[0]["timestamp"].date().isoformat(),
+            "open": _f(xs[0]["open"]),
+            "high": max(_f(x["high"]) for x in xs),
+            "low": min(_f(x["low"]) for x in xs),
+            "close": _f(xs[-1]["close"]),
+            "volume": sum(_f(x["volume"]) or 0.0 for x in xs),
+        }
+
+    sessions = []
+    for d in dates[-20:]:
+        xs = [b for b in bars15 if b["timestamp"].date() == d]
+        s = session_summary(xs)
+        if s:
+            sessions.append(s)
+
+    last5 = sessions[-5:]
+    last20 = sessions[-20:]
+    completed_sessions = [s for s in sessions if s["date"] != current_day.isoformat()]
+    avg20_volume = (
+        sum(s["volume"] for s in completed_sessions[-20:]) / len(completed_sessions[-20:])
+        if completed_sessions
+        else None
+    )
+    today = session_summary(today_bars)
+    prev = session_summary(prev_bars)
+
+    px = _f(latest["close"])
+    e20_15 = ema(closes15, 20)
+    e50_15 = ema(closes15, 50)
+    e200_15 = ema(closes15, 200)
+    e20_1h = ema(closes1h, 20)
+    e50_1h = ema(closes1h, 50)
+    e200_1h = ema(closes1h, 200)
+
+    return {
+        "symbol": symbol,
+        "generated_at": now.isoformat(),
+        "latest": {
+            "timestamp": latest_ts.isoformat(),
+            "price": px,
+            "volume_15m": _f(latest["volume"]),
+        },
+        "trend_15m": {
+            "rsi14": rsi(closes15, 14),
+            "ema20": e20_15,
+            "ema50": e50_15,
+            "ema200": e200_15,
+            "atr14": atr(bars15, 14),
+            "price_vs_ema20_pct": ((px / e20_15) - 1) * 100 if px and e20_15 else None,
+            "price_vs_ema50_pct": ((px / e50_15) - 1) * 100 if px and e50_15 else None,
+        },
+        "trend_1h": {
+            "rsi14": rsi(closes1h, 14),
+            "ema20": e20_1h,
+            "ema50": e50_1h,
+            "ema200": e200_1h,
+            "atr14": atr(bars1h, 14),
+            "price_vs_ema20_pct": ((px / e20_1h) - 1) * 100 if px and e20_1h else None,
+            "price_vs_ema50_pct": ((px / e50_1h) - 1) * 100 if px and e50_1h else None,
+        },
+        "today": today,
+        "previous_session": prev,
+        "volume": {
+            "avg_completed_session_volume_20d": avg20_volume,
+            "today_vs_avg20": (today["volume"] / avg20_volume) if today and avg20_volume else None,
+        },
+        "levels": {
+            "last5_high": max(s["high"] for s in last5) if last5 else None,
+            "last5_low": min(s["low"] for s in last5) if last5 else None,
+            "last20_high": max(s["high"] for s in last20) if last20 else None,
+            "last20_low": min(s["low"] for s in last20) if last20 else None,
+            "previous_high": prev["high"] if prev else None,
+            "previous_low": prev["low"] if prev else None,
+            "today_high": today["high"] if today else None,
+            "today_low": today["low"] if today else None,
+        },
+        "sessions": last20,
+    }
