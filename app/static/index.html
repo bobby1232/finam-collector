@@ -30,7 +30,7 @@ canvas{width:100%;display:block}.price{height:500px}.volume{height:170px}
       <option value="15m" selected>15 мин</option><option value="1h">1 час</option>
       <option value="4h">4 часа</option><option value="1d">1 день</option>
     </select>
-    <button data-range="1">1D</button><button data-range="7">7D</button><button data-range="30">1M</button><button data-range="0" class="active">С июня</button>
+    <button data-range="1">1D</button><button data-range="7">7D</button><button data-range="30">1M</button><button data-range="365">1Y</button><button data-range="0" class="active">Вся история</button>
   </div>
 </div>
 <div class="cards">
@@ -44,7 +44,7 @@ canvas{width:100%;display:block}.price{height:500px}.volume{height:170px}
 <div class="panel"><div class="row"><strong>Объём</strong><span class="status" id="backfill"></span></div><canvas id="volume" class="volume"></canvas></div>
 </div>
 <script>
-const $=id=>document.getElementById(id);let rangeDays=0,currentBars=[];
+const $=id=>document.getElementById(id);let rangeDays=0,currentBars=[],historyStart=null;
 function resize(c){const r=c.getBoundingClientRect(),d=devicePixelRatio||1;c.width=Math.floor(r.width*d);c.height=Math.floor(r.height*d);return{ctx:c.getContext('2d'),w:c.width,h:c.height,d}}
 function fmt(n,d=2){return Number(n).toLocaleString('ru-RU',{maximumFractionDigits:d})}
 function xPos(i,n,w,p){return p+(n<2?0:i/(n-1)*(w-2*p))}
@@ -93,18 +93,19 @@ function volumeChart(){
   drawTimeAxis(ctx,b,w,h,d,p);
 }
 async function load(){
-  const symbol=$('instrument').value;if(!symbol)return;const interval=$('interval').value,end=new Date(),start=rangeDays?new Date(end-rangeDays*86400000):new Date('2026-06-01T00:00:00+03:00');
+  const symbol=$('instrument').value;if(!symbol)return;const interval=$('interval').value,end=new Date(),start=rangeDays?new Date(end-rangeDays*86400000):(historyStart?new Date(historyStart+'T00:00:00+03:00'):null);
   $('priceStatus').textContent='загрузка…';const u=new URL('/api/candles',location.origin);
-  u.searchParams.set('symbol',symbol);u.searchParams.set('timeframe','TIME_FRAME_M1');u.searchParams.set('interval',interval);u.searchParams.set('start',start.toISOString());u.searchParams.set('end',end.toISOString());u.searchParams.set('max_points','5000');
+  u.searchParams.set('symbol',symbol);u.searchParams.set('timeframe','TIME_FRAME_M1');u.searchParams.set('interval',interval);if(start)u.searchParams.set('start',start.toISOString());u.searchParams.set('end',end.toISOString());u.searchParams.set('max_points','5000');
   const r=await fetch(u),j=await r.json();currentBars=j.bars||[];const b=currentBars;
   if(b.length){const f=+b[0].open,l=+b[b.length-1].close,ch=(l/f-1)*100;$('last').textContent=fmt(l);$('change').textContent=(ch>=0?'+':'')+fmt(ch)+'%';$('change').style.color=ch>=0?'#3ddc97':'#ff6b6b';$('high').textContent=fmt(Math.max(...b.map(x=>+x.high)));$('low').textContent=fmt(Math.min(...b.map(x=>+x.low)));$('vol').textContent=fmt(b[b.length-1].volume,0);$('priceStatus').textContent=symbol+' · '+interval+' · '+b.length.toLocaleString('ru-RU')+' свечей · '+new Date(b[b.length-1].timestamp).toLocaleString('ru-RU')}
   priceChart();volumeChart();
 }
 async function init(){
+  try{const s=await(await fetch('/backfill/status')).json();historyStart=s.from||null;}catch(e){}
   const i=await(await fetch('/api/instruments')).json();i.instruments.forEach(x=>{const o=document.createElement('option');o.value=x.symbol;o.textContent=x.symbol.replace('@MISX','').replace('@RTSX','');$('instrument').appendChild(o)});
   $('instrument').onchange=load;$('interval').onchange=load;
   document.querySelectorAll('[data-range]').forEach(b=>b.onclick=()=>{document.querySelectorAll('[data-range]').forEach(x=>x.classList.remove('active'));b.classList.add('active');rangeDays=+b.dataset.range;if(rangeDays===1)$('interval').value='1m';if(rangeDays===0&&$('interval').value==='1m')$('interval').value='15m';load()});
-  setInterval(async()=>{try{const s=await(await fetch('/backfill/status')).json();$('backfill').textContent=s.status==='done'?'История с июня загружена':'Backfill: '+s.status+' · '+(s.current||'');$('backfill').className='status '+(s.status==='done'?'ok':'')}catch(e){}},3000);
+  setInterval(async()=>{try{const s=await(await fetch('/backfill/status')).json();historyStart=s.from||historyStart;const fromLabel=historyStart?new Date(historyStart+'T00:00:00').toLocaleDateString('ru-RU'):'—';$('backfill').textContent=s.status==='done'?'История с '+fromLabel+' загружена':'Backfill с '+fromLabel+': '+s.status+' · '+(s.current||'');$('backfill').className='status '+(s.status==='done'?'ok':'')}catch(e){}},3000);
   await load();setInterval(load,30000);
 }
 window.addEventListener('resize',()=>{priceChart();volumeChart()});init();
