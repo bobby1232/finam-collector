@@ -27,9 +27,12 @@ ON candles (ticker, timeframe, ts DESC);
 
 CREATE TABLE IF NOT EXISTS backfill_status (
     ticker TEXT PRIMARY KEY,
+    backfill_from DATE,
     completed_through DATE NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE backfill_status ADD COLUMN IF NOT EXISTS backfill_from DATE;
 """
 
 UPSERT_SQL = """
@@ -122,29 +125,59 @@ class Database:
                 )
                 return cur.fetchone()[0]
 
-    def backfill_completed_through(self, ticker: str):
-        with psycopg.connect(self.url) as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT completed_through FROM backfill_status WHERE ticker=%s",
-                    (ticker,),
-                )
-                row = cur.fetchone()
-                return row[0] if row else None
-
-    def mark_backfill_completed(self, ticker: str, completed_through) -> None:
+    def ensure_backfill_window(self, ticker: str, backfill_from) -> Any:
+        """
+        Return the checkpoint for the requested history window.
+        If BACKFILL_FROM changed, reset only the checkpoint; existing candles remain
+        and will be refreshed through the normal UPSERT path.
+        """
         with psycopg.connect(self.url) as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    INSERT INTO backfill_status (ticker, completed_through, updated_at)
-                    VALUES (%s, %s, NOW())
+                    SELECT backfill_from, completed_through
+                    FROM backfill_status
+                    WHERE ticker=%s
+                    """,
+                    (ticker,),
+                )
+                row = cur.fetchone()
+
+                if row and row[0] == backfill_from:
+                    return row[1]
+
+                checkpoint = backfill_from - __import__("datetime").timedelta(days=1)
+                cur.execute(
+                    """
+                    INSERT INTO backfill_status
+                        (ticker, backfill_from, completed_through, updated_at)
+                    VALUES (%s, %s, %s, NOW())
                     ON CONFLICT (ticker)
                     DO UPDATE SET
+                        backfill_from = EXCLUDED.backfill_from,
                         completed_through = EXCLUDED.completed_through,
                         updated_at = NOW()
                     """,
-                    (ticker, completed_through),
+                    (ticker, backfill_from, checkpoint),
+                )
+            conn.commit()
+        return checkpoint
+
+    def mark_backfill_completed(self, ticker: str, backfill_from, completed_through) -> None:
+        with psycopg.connect(self.url) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO backfill_status
+                        (ticker, backfill_from, completed_through, updated_at)
+                    VALUES (%s, %s, %s, NOW())
+                    ON CONFLICT (ticker)
+                    DO UPDATE SET
+                        backfill_from = EXCLUDED.backfill_from,
+                        completed_through = EXCLUDED.completed_through,
+                        updated_at = NOW()
+                    """,
+                    (ticker, backfill_from, completed_through),
                 )
             conn.commit()
 
