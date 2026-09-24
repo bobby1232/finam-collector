@@ -268,6 +268,16 @@ async def log_si_snapshot_once():
         log.exception("SI extended snapshot failed")
 
 
+async def log_rosn_snapshot_once():
+    await asyncio.sleep(3)
+    try:
+        db = Database(DATABASE_URL)
+        snapshot = await asyncio.to_thread(build_technical_snapshot, db, "ROSN@MISX")
+        log.info("ROSN_TECH_SNAPSHOT %s", json.dumps(snapshot, ensure_ascii=False, default=str))
+    except Exception:
+        log.exception("ROSN technical snapshot failed")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     db = Database(DATABASE_URL)
@@ -276,8 +286,9 @@ async def lifespan(app: FastAPI):
     backfill = asyncio.create_task(backfill_loop())
     gmkn_snapshot = asyncio.create_task(log_gmkn_snapshot_once())
     si_snapshot = asyncio.create_task(log_si_snapshot_once())
+    rosn_snapshot = asyncio.create_task(log_rosn_snapshot_once())
     yield
-    for task in (collector, backfill, gmkn_snapshot, si_snapshot):
+    for task in (collector, backfill, gmkn_snapshot, si_snapshot, rosn_snapshot):
         task.cancel()
         try:
             await task
