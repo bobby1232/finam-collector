@@ -5,18 +5,25 @@
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>Market Data</title>
 <style>
-:root{color-scheme:dark;--bg:#0b0f14;--panel:#121821;--line:#253140;--text:#e8edf3;--muted:#8e9bab;--good:#3ddc97;--bad:#ff6b6b;--accent:#73a7ff}
+:root{color-scheme:dark;--bg:#0b0f14;--panel:#121821;--line:#253140;--text:#e8edf3;--muted:#8e9bab;--good:#3ddc97;--bad:#ff6b6b;--accent:#73a7ff;--warn:#f7c948}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,system-ui,-apple-system,Segoe UI,sans-serif}
 .wrap{max-width:1500px;margin:auto;padding:24px}.header{display:flex;justify-content:space-between;gap:16px;align-items:center;flex-wrap:wrap}
-h1{font-size:24px;margin:0}.sub{color:var(--muted);font-size:13px}.controls{display:flex;gap:8px;flex-wrap:wrap}
+h1{font-size:24px;margin:0}.sub{color:var(--muted);font-size:13px}.controls,.ta-controls{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 select,button{background:var(--panel);border:1px solid var(--line);color:var(--text);padding:9px 12px;border-radius:9px}
-button{cursor:pointer}button.active{border-color:var(--accent)}
+button{cursor:pointer;transition:.15s ease}button:hover{border-color:#44566d}button.active{border-color:var(--accent);box-shadow:0 0 0 1px rgba(115,167,255,.18) inset}
 .cards{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;margin:20px 0}
-.card,.panel{background:var(--panel);border:1px solid var(--line);border-radius:12px}.card{padding:14px}.panel{padding:14px;margin-top:12px}
+.ta-cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:12px}
+.card,.panel,.ta-card{background:var(--panel);border:1px solid var(--line);border-radius:12px}.card,.ta-card{padding:14px}.panel{padding:14px;margin-top:12px}
 .label{font-size:12px;color:var(--muted)}.value{font-size:20px;margin-top:6px;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-canvas{width:100%;display:block}.price{height:500px}.volume{height:170px}
-.row{display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:8px}.status{font-size:12px;color:var(--muted)}.ok{color:var(--good)}
-@media(max-width:800px){.cards{grid-template-columns:repeat(2,1fr)}.price{height:350px}}
+.ta-value{font-size:15px;margin-top:5px;line-height:1.3}.ta-note{font-size:11px;color:var(--muted);margin-top:4px}
+canvas{width:100%;display:block}.price{height:500px}.volume{height:170px}.study{height:230px}
+.row{display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:8px;flex-wrap:wrap}.status{font-size:12px;color:var(--muted)}.ok{color:var(--good)}
+.ta-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}.ta-title{display:flex;flex-direction:column;gap:3px}
+.ta-controls button{padding:7px 10px;font-size:12px}.divider{width:1px;height:24px;background:var(--line);margin:0 2px}
+.legend{display:flex;gap:12px;flex-wrap:wrap;color:var(--muted);font-size:11px;margin-top:7px}.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px}
+.hidden{display:none}
+@media(max-width:900px){.cards{grid-template-columns:repeat(2,1fr)}.ta-cards{grid-template-columns:repeat(2,1fr)}.price{height:380px}}
+@media(max-width:560px){.ta-cards{grid-template-columns:1fr}.wrap{padding:14px}}
 </style>
 </head>
 <body>
@@ -33,6 +40,7 @@ canvas{width:100%;display:block}.price{height:500px}.volume{height:170px}
     <button data-range="1">1D</button><button data-range="7">7D</button><button data-range="30">1M</button><button data-range="365">1Y</button><button data-range="0" class="active">Вся история</button>
   </div>
 </div>
+
 <div class="cards">
   <div class="card"><div class="label">Последняя цена</div><div class="value" id="last">—</div></div>
   <div class="card"><div class="label">Изменение периода</div><div class="value" id="change">—</div></div>
@@ -40,75 +48,242 @@ canvas{width:100%;display:block}.price{height:500px}.volume{height:170px}
   <div class="card"><div class="label">Минимум</div><div class="value" id="low">—</div></div>
   <div class="card"><div class="label">Объём последней свечи</div><div class="value" id="vol">—</div></div>
 </div>
-<div class="panel"><div class="row"><strong>OHLC</strong><span class="status" id="priceStatus"></span></div><canvas id="price" class="price"></canvas></div>
+
+<div class="panel">
+  <div class="ta-head">
+    <div class="ta-title"><strong>Технический анализ</strong><span class="status">Индикаторы считаются по выбранному таймфрейму и видимому диапазону</span></div>
+    <div class="ta-controls">
+      <button data-overlay="ema">EMA 20/50/200</button>
+      <button data-study="rsi">RSI 14</button>
+      <button data-study="macd">MACD</button>
+      <button data-overlay="bb">Bollinger 20/2</button>
+      <button data-study="atr">ATR 14</button>
+      <button data-overlay="vwap">VWAP</button>
+      <button data-study="adx">ADX 14</button>
+      <span class="divider"></span>
+      <button id="balancedPreset">Комплекс</button>
+      <button id="clearIndicators">Сброс</button>
+    </div>
+  </div>
+  <div class="ta-cards">
+    <div class="ta-card"><div class="label">Тренд · EMA</div><div class="ta-value" id="trendSignal">—</div><div class="ta-note" id="trendValues">EMA20 / EMA50 / EMA200</div></div>
+    <div class="ta-card"><div class="label">Импульс · RSI / MACD</div><div class="ta-value" id="momentumSignal">—</div><div class="ta-note" id="momentumValues">RSI14 / MACD</div></div>
+    <div class="ta-card"><div class="label">Волатильность · ATR / BB</div><div class="ta-value" id="volatilitySignal">—</div><div class="ta-note" id="volatilityValues">ATR14 / ширина Bollinger</div></div>
+    <div class="ta-card"><div class="label">Сила тренда · ADX</div><div class="ta-value" id="adxSignal">—</div><div class="ta-note" id="adxValues">ADX14</div></div>
+  </div>
+</div>
+
+<div class="panel">
+  <div class="row"><strong>OHLC</strong><span class="status" id="priceStatus"></span></div>
+  <canvas id="price" class="price"></canvas>
+  <div class="legend" id="overlayLegend"></div>
+</div>
+
+<div class="panel" id="studyPanel">
+  <div class="row"><strong id="studyTitle">RSI 14</strong><span class="status" id="studyStatus">Осциллятор</span></div>
+  <canvas id="study" class="study"></canvas>
+</div>
+
 <div class="panel"><div class="row"><strong>Объём</strong><span class="status" id="backfill"></span></div><canvas id="volume" class="volume"></canvas></div>
 </div>
+
 <script>
-const $=id=>document.getElementById(id);let rangeDays=0,currentBars=[],historyStart=null;
+const $=id=>document.getElementById(id);
+let rangeDays=0,currentBars=[],historyStart=null,currentStudy='rsi';
+const activeOverlays=new Set(['ema']);
+
+const COLORS={
+  ema20:'#73a7ff',ema50:'#f7c948',ema200:'#c084fc',
+  bb:'#8e9bab',vwap:'#22d3ee',macd:'#73a7ff',signal:'#f7c948',
+  histUp:'rgba(61,220,151,.55)',histDown:'rgba(255,107,107,.55)',study:'#73a7ff'
+};
+
 function resize(c){const r=c.getBoundingClientRect(),d=devicePixelRatio||1;c.width=Math.floor(r.width*d);c.height=Math.floor(r.height*d);return{ctx:c.getContext('2d'),w:c.width,h:c.height,d}}
-function fmt(n,d=2){return Number(n).toLocaleString('ru-RU',{maximumFractionDigits:d})}
+function fmt(n,d=2){return Number.isFinite(+n)?Number(n).toLocaleString('ru-RU',{maximumFractionDigits:d}):'—'}
+function lastValid(a){for(let i=a.length-1;i>=0;i--)if(a[i]!=null&&Number.isFinite(a[i]))return a[i];return null}
 function xPos(i,n,w,p){return p+(n<2?0:i/(n-1)*(w-2*p))}
 function yPos(v,mn,mx,h,p){return h-p-(v-mn)/(mx-mn||1)*(h-2*p)}
+function closes(){return currentBars.map(x=>+x.close)}
+function highs(){return currentBars.map(x=>+x.high)}
+function lows(){return currentBars.map(x=>+x.low)}
+function volumes(){return currentBars.map(x=>+x.volume||0)}
+
+function sma(values,period){
+  const out=Array(values.length).fill(null);let sum=0;
+  for(let i=0;i<values.length;i++){sum+=values[i];if(i>=period)sum-=values[i-period];if(i>=period-1)out[i]=sum/period}
+  return out;
+}
+function ema(values,period){
+  const out=Array(values.length).fill(null);if(values.length<period)return out;
+  let seed=0;for(let i=0;i<period;i++)seed+=values[i];let e=seed/period;out[period-1]=e;
+  const a=2/(period+1);for(let i=period;i<values.length;i++){e=a*values[i]+(1-a)*e;out[i]=e}return out;
+}
+function emaNullable(values,period){
+  const out=Array(values.length).fill(null),idx=[];
+  for(let i=0;i<values.length;i++)if(values[i]!=null&&Number.isFinite(values[i]))idx.push(i);
+  if(idx.length<period)return out;
+  let seed=0;for(let k=0;k<period;k++)seed+=values[idx[k]];let e=seed/period;out[idx[period-1]]=e;const a=2/(period+1);
+  for(let k=period;k<idx.length;k++){const i=idx[k];e=a*values[i]+(1-a)*e;out[i]=e}return out;
+}
+function rsi(values,period=14){
+  const out=Array(values.length).fill(null);if(values.length<=period)return out;
+  let gain=0,loss=0;
+  for(let i=1;i<=period;i++){const d=values[i]-values[i-1];gain+=Math.max(d,0);loss+=Math.max(-d,0)}
+  let ag=gain/period,al=loss/period;out[period]=al===0?100:100-100/(1+ag/al);
+  for(let i=period+1;i<values.length;i++){const d=values[i]-values[i-1];ag=(ag*(period-1)+Math.max(d,0))/period;al=(al*(period-1)+Math.max(-d,0))/period;out[i]=al===0?100:100-100/(1+ag/al)}
+  return out;
+}
+function macd(values){
+  const e12=ema(values,12),e26=ema(values,26),line=values.map((_,i)=>e12[i]!=null&&e26[i]!=null?e12[i]-e26[i]:null),signal=emaNullable(line,9);
+  const hist=line.map((v,i)=>v!=null&&signal[i]!=null?v-signal[i]:null);return{line,signal,hist};
+}
+function bollinger(values,period=20,k=2){
+  const mid=sma(values,period),upper=Array(values.length).fill(null),lower=Array(values.length).fill(null);
+  for(let i=period-1;i<values.length;i++){let s=0;for(let j=i-period+1;j<=i;j++)s+=(values[j]-mid[i])**2;const sd=Math.sqrt(s/period);upper[i]=mid[i]+k*sd;lower[i]=mid[i]-k*sd}
+  return{mid,upper,lower};
+}
+function atr(b,period=14){
+  const tr=Array(b.length).fill(null),out=Array(b.length).fill(null);if(!b.length)return out;
+  tr[0]=+b[0].high-(+b[0].low);
+  for(let i=1;i<b.length;i++)tr[i]=Math.max(+b[i].high-(+b[i].low),Math.abs(+b[i].high-(+b[i-1].close)),Math.abs(+b[i].low-(+b[i-1].close)));
+  if(b.length<period)return out;let a=0;for(let i=0;i<period;i++)a+=tr[i];a/=period;out[period-1]=a;
+  for(let i=period;i<b.length;i++){a=(a*(period-1)+tr[i])/period;out[i]=a}return out;
+}
+function adx(b,period=14){
+  const n=b.length,out=Array(n).fill(null);if(n<period*2)return out;
+  const tr=Array(n).fill(0),pdm=Array(n).fill(0),mdm=Array(n).fill(0);
+  for(let i=1;i<n;i++){
+    const up=+b[i].high-(+b[i-1].high),dn=+b[i-1].low-(+b[i].low);
+    pdm[i]=(up>dn&&up>0)?up:0;mdm[i]=(dn>up&&dn>0)?dn:0;
+    tr[i]=Math.max(+b[i].high-(+b[i].low),Math.abs(+b[i].high-(+b[i-1].close)),Math.abs(+b[i].low-(+b[i-1].close)));
+  }
+  let trS=0,pS=0,mS=0;for(let i=1;i<=period;i++){trS+=tr[i];pS+=pdm[i];mS+=mdm[i]}
+  const dx=Array(n).fill(null);
+  for(let i=period;i<n;i++){
+    if(i>period){trS=trS-trS/period+tr[i];pS=pS-pS/period+pdm[i];mS=mS-mS/period+mdm[i]}
+    const pdi=trS?100*pS/trS:0,mdi=trS?100*mS/trS:0;dx[i]=(pdi+mdi)?100*Math.abs(pdi-mdi)/(pdi+mdi):0;
+  }
+  let sum=0,count=0;for(let i=period;i<period*2&&i<n;i++){if(dx[i]!=null){sum+=dx[i];count++}}
+  if(!count)return out;let a=sum/count;out[period*2-1]=a;
+  for(let i=period*2;i<n;i++){a=(a*(period-1)+dx[i])/period;out[i]=a}return out;
+}
+function vwap(b){
+  const out=Array(b.length).fill(null);let pv=0,v=0;
+  for(let i=0;i<b.length;i++){const vol=+b[i].volume||0,tp=(+b[i].high+(+b[i].low)+(+b[i].close))/3;pv+=tp*vol;v+=vol;out[i]=v?pv/v:null}
+  return out;
+}
+function indicatorSet(){
+  const c=closes(),e20=ema(c,20),e50=ema(c,50),e200=ema(c,200),rs=rsi(c),mc=macd(c),bb=bollinger(c),at=atr(currentBars),ax=adx(currentBars),vw=vwap(currentBars);
+  return{c,e20,e50,e200,rs,mc,bb,at,ax,vw};
+}
 function timeLabel(ts){
-  const dt=new Date(ts);
-  const time=dt.toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'});
-  const date=dt.toLocaleDateString('ru-RU',{day:'2-digit',month:'2-digit'});
-  if(rangeDays===1)return time;
-  if(rangeDays>1&&rangeDays<=7)return date+' '+time;
-  return date;
+  const dt=new Date(ts),time=dt.toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'}),date=dt.toLocaleDateString('ru-RU',{day:'2-digit',month:'2-digit'});
+  if(rangeDays===1)return time;if(rangeDays>1&&rangeDays<=7)return date+' '+time;return date;
 }
 function drawTimeAxis(ctx,b,w,h,d,p){
-  if(!b.length)return;
-  const ticks=Math.min(7,b.length),labelY=h-8*d;
-  ctx.font=(11*d)+'px system-ui';
-  ctx.fillStyle='#8e9bab';
-  ctx.strokeStyle='#253140';
-  ctx.lineWidth=d;
-  for(let t=0;t<ticks;t++){
-    const i=ticks===1?0:Math.round(t*(b.length-1)/(ticks-1));
-    const x=xPos(i,b.length,w,p);
-    ctx.beginPath();ctx.moveTo(x,p);ctx.lineTo(x,h-p);ctx.stroke();
-    ctx.textAlign=t===0?'left':(t===ticks-1?'right':'center');
-    ctx.fillText(timeLabel(b[i].timestamp),x,labelY);
-  }
+  if(!b.length)return;const ticks=Math.min(7,b.length),labelY=h-8*d;ctx.font=(11*d)+'px system-ui';ctx.fillStyle='#8e9bab';ctx.strokeStyle='#253140';ctx.lineWidth=d;
+  for(let t=0;t<ticks;t++){const i=ticks===1?0:Math.round(t*(b.length-1)/(ticks-1)),x=xPos(i,b.length,w,p);ctx.beginPath();ctx.moveTo(x,p);ctx.lineTo(x,h-p);ctx.stroke();ctx.textAlign=t===0?'left':(t===ticks-1?'right':'center');ctx.fillText(timeLabel(b[i].timestamp),x,labelY)}
   ctx.textAlign='left';
+}
+function drawLine(ctx,series,mn,mx,w,h,p,d,color,width=1.5){
+  ctx.strokeStyle=color;ctx.lineWidth=width*d;ctx.beginPath();let started=false;
+  series.forEach((v,i)=>{if(v==null||!Number.isFinite(v))return;const x=xPos(i,series.length,w,p),y=yPos(v,mn,mx,h,p);if(!started){ctx.moveTo(x,y);started=true}else ctx.lineTo(x,y)});
+  ctx.stroke();
+}
+function overlayLegend(){
+  const parts=[];
+  if(activeOverlays.has('ema'))parts.push('<span><i class="dot" style="background:'+COLORS.ema20+'"></i>EMA20</span><span><i class="dot" style="background:'+COLORS.ema50+'"></i>EMA50</span><span><i class="dot" style="background:'+COLORS.ema200+'"></i>EMA200</span>');
+  if(activeOverlays.has('bb'))parts.push('<span><i class="dot" style="background:'+COLORS.bb+'"></i>Bollinger 20/2</span>');
+  if(activeOverlays.has('vwap'))parts.push('<span><i class="dot" style="background:'+COLORS.vwap+'"></i>VWAP диапазона</span>');
+  $('overlayLegend').innerHTML=parts.join('');
 }
 function priceChart(){
   const c=$('price'),{ctx,w,h,d}=resize(c),b=currentBars;ctx.clearRect(0,0,w,h);if(!b.length)return;
-  const p=48*d,mn=Math.min(...b.map(x=>+x.low)),mx=Math.max(...b.map(x=>+x.high)),step=(w-2*p)/Math.max(1,b.length-1),bw=Math.max(1*d,Math.min(8*d,step*.7));
-  ctx.strokeStyle='#253140';ctx.lineWidth=d;
-  for(let i=0;i<5;i++){const y=p+i*(h-2*p)/4;ctx.beginPath();ctx.moveTo(p,y);ctx.lineTo(w-p,y);ctx.stroke()}
-  b.forEach((z,i)=>{const x=xPos(i,b.length,w,p),o=+z.open,cl=+z.close,hi=+z.high,lo=+z.low,up=cl>=o,color=up?'#3ddc97':'#ff6b6b';
-    const yh=yPos(hi,mn,mx,h,p),yl=yPos(lo,mn,mx,h,p),yo=yPos(o,mn,mx,h,p),yc=yPos(cl,mn,mx,h,p);
-    ctx.strokeStyle=color;ctx.lineWidth=d;ctx.beginPath();ctx.moveTo(x,yh);ctx.lineTo(x,yl);ctx.stroke();
-    ctx.fillStyle=color;const top=Math.min(yo,yc),bh=Math.max(1*d,Math.abs(yc-yo));ctx.fillRect(x-bw/2,top,bw,bh);
-  });
-  ctx.fillStyle='#8e9bab';ctx.font=(11*d)+'px system-ui';ctx.fillText(fmt(mx),4*d,p);ctx.fillText(fmt(mn),4*d,h-p);
+  const ind=indicatorSet(),extra=[];
+  if(activeOverlays.has('ema'))extra.push(...ind.e20.filter(Number.isFinite),...ind.e50.filter(Number.isFinite),...ind.e200.filter(Number.isFinite));
+  if(activeOverlays.has('bb'))extra.push(...ind.bb.upper.filter(Number.isFinite),...ind.bb.lower.filter(Number.isFinite));
+  if(activeOverlays.has('vwap'))extra.push(...ind.vw.filter(Number.isFinite));
+  const rawLow=b.map(x=>+x.low),rawHigh=b.map(x=>+x.high),mn=Math.min(...rawLow,...extra),mx=Math.max(...rawHigh,...extra);
+  const p=48*d,step=(w-2*p)/Math.max(1,b.length-1),bw=Math.max(1*d,Math.min(8*d,step*.7));
+  ctx.strokeStyle='#253140';ctx.lineWidth=d;for(let i=0;i<5;i++){const y=p+i*(h-2*p)/4;ctx.beginPath();ctx.moveTo(p,y);ctx.lineTo(w-p,y);ctx.stroke()}
+  b.forEach((z,i)=>{const x=xPos(i,b.length,w,p),o=+z.open,cl=+z.close,hi=+z.high,lo=+z.low,color=cl>=o?'#3ddc97':'#ff6b6b',yh=yPos(hi,mn,mx,h,p),yl=yPos(lo,mn,mx,h,p),yo=yPos(o,mn,mx,h,p),yc=yPos(cl,mn,mx,h,p);ctx.strokeStyle=color;ctx.lineWidth=d;ctx.beginPath();ctx.moveTo(x,yh);ctx.lineTo(x,yl);ctx.stroke();ctx.fillStyle=color;ctx.fillRect(x-bw/2,Math.min(yo,yc),bw,Math.max(1*d,Math.abs(yc-yo)))});
+  if(activeOverlays.has('bb')){drawLine(ctx,ind.bb.upper,mn,mx,w,h,p,d,COLORS.bb,1);drawLine(ctx,ind.bb.mid,mn,mx,w,h,p,d,'rgba(142,155,171,.65)',1);drawLine(ctx,ind.bb.lower,mn,mx,w,h,p,d,COLORS.bb,1)}
+  if(activeOverlays.has('ema')){drawLine(ctx,ind.e20,mn,mx,w,h,p,d,COLORS.ema20);drawLine(ctx,ind.e50,mn,mx,w,h,p,d,COLORS.ema50);drawLine(ctx,ind.e200,mn,mx,w,h,p,d,COLORS.ema200)}
+  if(activeOverlays.has('vwap'))drawLine(ctx,ind.vw,mn,mx,w,h,p,d,COLORS.vwap,1.4);
+  ctx.fillStyle='#8e9bab';ctx.font=(11*d)+'px system-ui';ctx.fillText(fmt(mx),4*d,p);ctx.fillText(fmt(mn),4*d,h-p);drawTimeAxis(ctx,b,w,h,d,p);overlayLegend();
+}
+function drawStudyGrid(ctx,w,h,d,p,mn,mx,levels=[]){
+  ctx.font=(11*d)+'px system-ui';ctx.lineWidth=d;
+  for(const lv of levels){const y=yPos(lv,mn,mx,h,p);ctx.strokeStyle='#344254';ctx.setLineDash([4*d,4*d]);ctx.beginPath();ctx.moveTo(p,y);ctx.lineTo(w-p,y);ctx.stroke();ctx.setLineDash([]);ctx.fillStyle='#8e9bab';ctx.fillText(fmt(lv,0),4*d,y)}
+}
+function studyChart(){
+  const c=$('study'),{ctx,w,h,d}=resize(c),b=currentBars;ctx.clearRect(0,0,w,h);if(!b.length)return;
+  const ind=indicatorSet(),p=34*d;
+  if(currentStudy==='rsi'){
+    $('studyTitle').textContent='RSI 14';$('studyStatus').textContent='Импульс · зоны 30 / 70';
+    drawStudyGrid(ctx,w,h,d,p,0,100,[30,50,70]);drawLine(ctx,ind.rs,0,100,w,h,p,d,COLORS.study,1.5);
+  }else if(currentStudy==='macd'){
+    $('studyTitle').textContent='MACD 12 / 26 / 9';$('studyStatus').textContent='Импульс и пересечение сигнальной линии';
+    const vals=[...ind.mc.line,...ind.mc.signal,...ind.mc.hist].filter(Number.isFinite),mn=Math.min(0,...vals),mx=Math.max(0,...vals);drawStudyGrid(ctx,w,h,d,p,mn,mx,[0]);
+    const zero=yPos(0,mn,mx,h,p),step=(w-2*p)/Math.max(1,b.length-1),bw=Math.max(1*d,Math.min(6*d,step*.7));
+    ind.mc.hist.forEach((v,i)=>{if(v==null)return;const x=xPos(i,b.length,w,p),y=yPos(v,mn,mx,h,p);ctx.fillStyle=v>=0?COLORS.histUp:COLORS.histDown;ctx.fillRect(x-bw/2,Math.min(y,zero),bw,Math.max(1*d,Math.abs(zero-y)))});
+    drawLine(ctx,ind.mc.line,mn,mx,w,h,p,d,COLORS.macd,1.4);drawLine(ctx,ind.mc.signal,mn,mx,w,h,p,d,COLORS.signal,1.2);
+  }else if(currentStudy==='atr'){
+    $('studyTitle').textContent='ATR 14';$('studyStatus').textContent='Абсолютная волатильность';
+    const vals=ind.at.filter(Number.isFinite),mn=Math.min(...vals),mx=Math.max(...vals);drawStudyGrid(ctx,w,h,d,p,mn,mx,[]);drawLine(ctx,ind.at,mn,mx,w,h,p,d,COLORS.study,1.5);
+  }else if(currentStudy==='adx'){
+    $('studyTitle').textContent='ADX 14';$('studyStatus').textContent='Сила тренда · ориентир 25';
+    drawStudyGrid(ctx,w,h,d,p,0,100,[20,25,50]);drawLine(ctx,ind.ax,0,100,w,h,p,d,COLORS.study,1.5);
+  }
   drawTimeAxis(ctx,b,w,h,d,p);
 }
 function volumeChart(){
   const c=$('volume'),{ctx,w,h,d}=resize(c),b=currentBars;ctx.clearRect(0,0,w,h);if(!b.length)return;
-  const p=22*d,v=b.map(x=>+x.volume||0),mx=Math.max(...v)||1,step=(w-2*p)/Math.max(1,v.length-1),bw=Math.max(1*d,Math.min(8*d,step*.75));
-  b.forEach((z,i)=>{const val=+z.volume||0,x=xPos(i,b.length,w,p),bh=val/mx*(h-2*p);ctx.fillStyle=(+z.close>=+z.open)?'rgba(61,220,151,.55)':'rgba(255,107,107,.55)';ctx.fillRect(x-bw/2,h-p-bh,bw,bh)});
-  drawTimeAxis(ctx,b,w,h,d,p);
+  const p=22*d,v=volumes(),mx=Math.max(...v)||1,step=(w-2*p)/Math.max(1,v.length-1),bw=Math.max(1*d,Math.min(8*d,step*.75));
+  b.forEach((z,i)=>{const val=+z.volume||0,x=xPos(i,b.length,w,p),bh=val/mx*(h-2*p);ctx.fillStyle=(+z.close>=+z.open)?'rgba(61,220,151,.55)':'rgba(255,107,107,.55)';ctx.fillRect(x-bw/2,h-p-bh,bw,bh)});drawTimeAxis(ctx,b,w,h,d,p);
 }
+function updateTA(){
+  if(!currentBars.length)return;const ind=indicatorSet();
+  const e20=lastValid(ind.e20),e50=lastValid(ind.e50),e200=lastValid(ind.e200),rv=lastValid(ind.rs),m=lastValid(ind.mc.line),ms=lastValid(ind.mc.signal),av=lastValid(ind.at),ax=lastValid(ind.ax),bu=lastValid(ind.bb.upper),bl=lastValid(ind.bb.lower),bm=lastValid(ind.bb.mid),last=+currentBars[currentBars.length-1].close;
+  let trend='Смешанная структура';if(e20&&e50&&e200&&e20>e50&&e50>e200)trend='Восходящая структура';else if(e20&&e50&&e200&&e20<e50&&e50<e200)trend='Нисходящая структура';
+  $('trendSignal').textContent=trend;$('trendValues').textContent='EMA20 '+fmt(e20)+' · EMA50 '+fmt(e50)+' · EMA200 '+fmt(e200);
+  let rtxt=rv==null?'RSI недоступен':rv>=70?'RSI в верхней зоне':rv<=30?'RSI в нижней зоне':'RSI нейтральный';const mtxt=(m!=null&&ms!=null)?(m>ms?'MACD выше signal':'MACD ниже signal'):'MACD недоступен';
+  $('momentumSignal').textContent=rtxt+' · '+mtxt;$('momentumValues').textContent='RSI '+fmt(rv,1)+' · MACD '+fmt(m,3)+' / '+fmt(ms,3);
+  const bbw=(bu!=null&&bl!=null&&bm)?(bu-bl)/bm*100:null,atrPct=av&&last?av/last*100:null;
+  $('volatilitySignal').textContent='ATR '+fmt(atrPct,2)+'% цены · BB width '+fmt(bbw,2)+'%';$('volatilityValues').textContent='ATR14 '+fmt(av)+' · цена '+fmt(last);
+  let atxt=ax==null?'ADX недоступен':ax>=25?'Тренд выражен':'Тренд слабый/неустойчивый';$('adxSignal').textContent=atxt;$('adxValues').textContent='ADX14 '+fmt(ax,1);
+}
+function syncIndicatorButtons(){
+  document.querySelectorAll('[data-overlay]').forEach(b=>b.classList.toggle('active',activeOverlays.has(b.dataset.overlay)));
+  document.querySelectorAll('[data-study]').forEach(b=>b.classList.toggle('active',b.dataset.study===currentStudy));
+}
+function renderAll(){priceChart();studyChart();volumeChart();updateTA();syncIndicatorButtons()}
+
 async function load(){
   const symbol=$('instrument').value;if(!symbol)return;const interval=$('interval').value,end=new Date(),start=rangeDays?new Date(end-rangeDays*86400000):(historyStart?new Date(historyStart+'T00:00:00+03:00'):null);
   $('priceStatus').textContent='загрузка…';const u=new URL('/api/candles',location.origin);
-  u.searchParams.set('symbol',symbol);u.searchParams.set('timeframe','TIME_FRAME_M1');u.searchParams.set('interval',interval);if(start)u.searchParams.set('start',start.toISOString());u.searchParams.set('end',end.toISOString());u.searchParams.set('max_points','5000');
+  u.searchParams.set('symbol',symbol);u.searchParams.set('timeframe','TIME_FRAME_M1');u.searchParams.set('interval',interval);if(start)u.searchParams.set('start',start.toISOString());u.searchParams.set('end',end.toISOString());u.searchParams.set('max_points','10000');
   const r=await fetch(u),j=await r.json();currentBars=j.bars||[];const b=currentBars;
   if(b.length){const f=+b[0].open,l=+b[b.length-1].close,ch=(l/f-1)*100;$('last').textContent=fmt(l);$('change').textContent=(ch>=0?'+':'')+fmt(ch)+'%';$('change').style.color=ch>=0?'#3ddc97':'#ff6b6b';$('high').textContent=fmt(Math.max(...b.map(x=>+x.high)));$('low').textContent=fmt(Math.min(...b.map(x=>+x.low)));$('vol').textContent=fmt(b[b.length-1].volume,0);$('priceStatus').textContent=symbol+' · '+interval+' · '+b.length.toLocaleString('ru-RU')+' свечей · '+new Date(b[b.length-1].timestamp).toLocaleString('ru-RU')}
-  priceChart();volumeChart();
+  renderAll();
+}
+function autoInterval(days){
+  if(days===1)return'1m';if(days===7)return'5m';if(days===30)return'15m';if(days===365)return'1h';return'1d';
 }
 async function init(){
   try{const s=await(await fetch('/backfill/status')).json();historyStart=s.from||null;}catch(e){}
   const i=await(await fetch('/api/instruments')).json();i.instruments.forEach(x=>{const o=document.createElement('option');o.value=x.symbol;o.textContent=x.symbol.replace('@MISX','').replace('@RTSX','');$('instrument').appendChild(o)});
   $('instrument').onchange=load;$('interval').onchange=load;
-  document.querySelectorAll('[data-range]').forEach(b=>b.onclick=()=>{document.querySelectorAll('[data-range]').forEach(x=>x.classList.remove('active'));b.classList.add('active');rangeDays=+b.dataset.range;if(rangeDays===1)$('interval').value='1m';if(rangeDays===0&&$('interval').value==='1m')$('interval').value='15m';load()});
+  document.querySelectorAll('[data-range]').forEach(b=>b.onclick=()=>{document.querySelectorAll('[data-range]').forEach(x=>x.classList.remove('active'));b.classList.add('active');rangeDays=+b.dataset.range;$('interval').value=autoInterval(rangeDays);load()});
+  document.querySelectorAll('[data-overlay]').forEach(b=>b.onclick=()=>{const k=b.dataset.overlay;activeOverlays.has(k)?activeOverlays.delete(k):activeOverlays.add(k);renderAll()});
+  document.querySelectorAll('[data-study]').forEach(b=>b.onclick=()=>{currentStudy=b.dataset.study;renderAll()});
+  $('balancedPreset').onclick=()=>{activeOverlays.clear();['ema','bb','vwap'].forEach(x=>activeOverlays.add(x));currentStudy='rsi';renderAll()};
+  $('clearIndicators').onclick=()=>{activeOverlays.clear();currentStudy='rsi';renderAll()};
   setInterval(async()=>{try{const s=await(await fetch('/backfill/status')).json();historyStart=s.from||historyStart;const fromLabel=historyStart?new Date(historyStart+'T00:00:00').toLocaleDateString('ru-RU'):'—';$('backfill').textContent=s.status==='done'?'История с '+fromLabel+' загружена':'Backfill с '+fromLabel+': '+s.status+' · '+(s.current||'');$('backfill').className='status '+(s.status==='done'?'ok':'')}catch(e){}},3000);
+  $('interval').value=autoInterval(rangeDays);
   await load();setInterval(load,30000);
 }
-window.addEventListener('resize',()=>{priceChart();volumeChart()});init();
+window.addEventListener('resize',renderAll);init();
 </script>
 </body>
 </html>
