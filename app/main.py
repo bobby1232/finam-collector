@@ -411,3 +411,8 @@ async def bars(
 async def si_analysis():
     db = Database(DATABASE_URL)
     return await asyncio.to_thread(build_si_analysis, db, "SI@CONT")
+
+
+# Protected read-only research endpoints.
+from app.research_api import router as research_router
+app.include_router(research_router)
