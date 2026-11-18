@@ -4,7 +4,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1
 
-RUN groupadd --system --gid 10001 app && \
+RUN apt-get update && \
+    apt-get upgrade --yes && \
+    rm -rf /var/lib/apt/lists/* && \
+    groupadd --system --gid 10001 app && \
     useradd --system --uid 10001 --gid app --home-dir /app app
 
 WORKDIR /app
