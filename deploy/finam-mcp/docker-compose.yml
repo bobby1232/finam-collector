@@ -8,7 +8,7 @@ services:
       keycloak:
         condition: service_healthy
     environment:
-      MCP_PUBLIC_HOST: ${MCP_PUBLIC_HOST:?set MCP_PUBLIC_HOST}
+      MCP_PUBLIC_HOST: ${MCP_PUBLIC_HOST}
     ports:
       - "127.0.0.1:8765:8765"
     volumes:
@@ -28,11 +28,11 @@ services:
       dockerfile: Dockerfile.mcp
     restart: unless-stopped
     environment:
-      COLLECTOR_BASE_URL: ${COLLECTOR_BASE_URL:?set COLLECTOR_BASE_URL}
-      RESEARCH_API_TOKEN: ${RESEARCH_API_TOKEN:?set RESEARCH_API_TOKEN}
-      MCP_RESOURCE_URL: ${MCP_RESOURCE_URL:?set MCP_RESOURCE_URL}
-      OAUTH_ISSUER_URL: ${OAUTH_ISSUER_URL:?set OAUTH_ISSUER_URL}
-      OAUTH_AUDIENCE: ${MCP_RESOURCE_URL:?set MCP_RESOURCE_URL}
+      COLLECTOR_BASE_URL: ${COLLECTOR_BASE_URL}
+      RESEARCH_API_TOKEN: ${RESEARCH_API_TOKEN}
+      MCP_RESOURCE_URL: ${MCP_RESOURCE_URL}
+      OAUTH_ISSUER_URL: ${OAUTH_ISSUER_URL}
+      OAUTH_AUDIENCE: ${MCP_RESOURCE_URL}
       MCP_REQUIRED_SCOPE: finam:read
       MCP_HOST: 0.0.0.0
       MCP_PORT: 8000
@@ -72,25 +72,25 @@ services:
       keycloak-db:
         condition: service_healthy
     environment:
-      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USERNAME:?set KEYCLOAK_ADMIN_USERNAME}
-      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?set KEYCLOAK_ADMIN_PASSWORD}
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USERNAME}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
       KC_DB: postgres
       KC_DB_URL: jdbc:postgresql://keycloak-db:5432/keycloak
       KC_DB_USERNAME: keycloak
-      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?set KEYCLOAK_DB_PASSWORD}
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
       KC_HTTP_ENABLED: "true"
       KC_HTTP_RELATIVE_PATH: /oauth
-      KC_HOSTNAME: https://${MCP_PUBLIC_HOST:?set MCP_PUBLIC_HOST}/oauth
+      KC_HOSTNAME: https://${MCP_PUBLIC_HOST}/oauth
       KC_PROXY_HEADERS: xforwarded
       KC_PROXY_TRUSTED_ADDRESSES: 172.16.0.0/12
       KC_HEALTH_ENABLED: "true"
       KC_METRICS_ENABLED: "false"
       KC_FEATURES: resource-indicators
       JAVA_OPTS_KC_HEAP: -XX:MaxHeapFreeRatio=30 -XX:MaxRAMPercentage=65
-      MCP_RESOURCE_URL: ${MCP_RESOURCE_URL:?set MCP_RESOURCE_URL}
-      CHATGPT_OAUTH_CLIENT_SECRET: ${CHATGPT_OAUTH_CLIENT_SECRET:?set CHATGPT_OAUTH_CLIENT_SECRET}
-      FINAM_MCP_USERNAME: ${FINAM_MCP_USERNAME:?set FINAM_MCP_USERNAME}
-      FINAM_MCP_USER_PASSWORD: ${FINAM_MCP_USER_PASSWORD:?set FINAM_MCP_USER_PASSWORD}
+      MCP_RESOURCE_URL: ${MCP_RESOURCE_URL}
+      CHATGPT_OAUTH_CLIENT_SECRET: ${CHATGPT_OAUTH_CLIENT_SECRET}
+      FINAM_MCP_USERNAME: ${FINAM_MCP_USERNAME}
+      FINAM_MCP_USER_PASSWORD: ${FINAM_MCP_USER_PASSWORD}
     volumes:
       - ./finam-realm.json:/opt/keycloak/data/import/finam-realm.json:ro
     networks:
@@ -119,7 +119,7 @@ services:
     environment:
       POSTGRES_DB: keycloak
       POSTGRES_USER: keycloak
-      POSTGRES_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?set KEYCLOAK_DB_PASSWORD}
+      POSTGRES_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
     volumes:
       - keycloak-data:/var/lib/postgresql/data
     networks:
