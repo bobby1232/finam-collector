@@ -2,6 +2,9 @@
 
 Railway-ready collector for Finam Trade API bars -> PostgreSQL.
 
+The repository also contains a separate, OAuth-protected, read-only MCP service for ChatGPT.
+Deployment and security instructions: [docs/CHATGPT_MCP_SETUP.md](docs/CHATGPT_MCP_SETUP.md).
+
 ## Configuration
 
 Required:

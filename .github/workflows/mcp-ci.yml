@@ -1,0 +1,61 @@
+name: MCP CI
+
+on:
+  push:
+    paths:
+      - "finam_mcp/**"
+      - "tests/**"
+      - "requirements-mcp*.txt"
+      - "Dockerfile.mcp"
+      - "deploy/finam-mcp/**"
+      - ".github/workflows/mcp-ci.yml"
+  pull_request:
+    paths:
+      - "finam_mcp/**"
+      - "tests/**"
+      - "requirements-mcp*.txt"
+      - "Dockerfile.mcp"
+      - "deploy/finam-mcp/**"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements-mcp-dev.txt
+      - run: ruff format --check finam_mcp tests
+      - run: ruff check finam_mcp tests
+      - run: mypy finam_mcp
+      - run: pytest -q
+      - run: python -m compileall -q finam_mcp
+      - run: pip-audit -r requirements-mcp.txt
+      - run: docker compose -f deploy/finam-mcp/docker-compose.yml --env-file deploy/finam-mcp/.env.example config --quiet
+
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.mcp
+          tags: finam-mcp:ci
+          push: false
+          load: true
+      - uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: finam-mcp:ci
+          format: table
+          exit-code: "1"
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true

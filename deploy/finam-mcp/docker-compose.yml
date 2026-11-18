@@ -1,0 +1,141 @@
+services:
+  gateway:
+    image: caddy:2.10.2-alpine
+    restart: unless-stopped
+    depends_on:
+      finam-mcp:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+    environment:
+      MCP_PUBLIC_HOST: ${MCP_PUBLIC_HOST:?set MCP_PUBLIC_HOST}
+    ports:
+      - "127.0.0.1:8765:8765"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+    networks:
+      - edge
+    read_only: true
+    tmpfs:
+      - /config:size=16m,mode=0700
+      - /data:size=16m,mode=0700
+    security_opt:
+      - no-new-privileges:true
+
+  finam-mcp:
+    build:
+      context: ../..
+      dockerfile: Dockerfile.mcp
+    restart: unless-stopped
+    environment:
+      COLLECTOR_BASE_URL: ${COLLECTOR_BASE_URL:?set COLLECTOR_BASE_URL}
+      RESEARCH_API_TOKEN: ${RESEARCH_API_TOKEN:?set RESEARCH_API_TOKEN}
+      MCP_RESOURCE_URL: ${MCP_RESOURCE_URL:?set MCP_RESOURCE_URL}
+      OAUTH_ISSUER_URL: ${OAUTH_ISSUER_URL:?set OAUTH_ISSUER_URL}
+      OAUTH_AUDIENCE: ${MCP_RESOURCE_URL:?set MCP_RESOURCE_URL}
+      MCP_REQUIRED_SCOPE: finam:read
+      MCP_HOST: 0.0.0.0
+      MCP_PORT: 8000
+      FRESHNESS_SECONDS: 180
+      RATE_LIMIT_REQUESTS: 60
+      RATE_LIMIT_WINDOW_SECONDS: 60
+      LOG_LEVEL: INFO
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - edge
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3)",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.8.2
+    restart: unless-stopped
+    command:
+      - start
+      - --import-realm
+    depends_on:
+      keycloak-db:
+        condition: service_healthy
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USERNAME:?set KEYCLOAK_ADMIN_USERNAME}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?set KEYCLOAK_ADMIN_PASSWORD}
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://keycloak-db:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?set KEYCLOAK_DB_PASSWORD}
+      KC_HTTP_ENABLED: "true"
+      KC_HTTP_RELATIVE_PATH: /oauth
+      KC_HOSTNAME: https://${MCP_PUBLIC_HOST:?set MCP_PUBLIC_HOST}/oauth
+      KC_PROXY_HEADERS: xforwarded
+      KC_PROXY_TRUSTED_ADDRESSES: 172.16.0.0/12
+      KC_HEALTH_ENABLED: "true"
+      KC_METRICS_ENABLED: "false"
+      KC_FEATURES: resource-indicators
+      JAVA_OPTS_KC_HEAP: -XX:MaxHeapFreeRatio=30 -XX:MaxRAMPercentage=65
+      MCP_RESOURCE_URL: ${MCP_RESOURCE_URL:?set MCP_RESOURCE_URL}
+      CHATGPT_OAUTH_CLIENT_SECRET: ${CHATGPT_OAUTH_CLIENT_SECRET:?set CHATGPT_OAUTH_CLIENT_SECRET}
+      FINAM_MCP_USERNAME: ${FINAM_MCP_USERNAME:?set FINAM_MCP_USERNAME}
+      FINAM_MCP_USER_PASSWORD: ${FINAM_MCP_USER_PASSWORD:?set FINAM_MCP_USER_PASSWORD}
+    volumes:
+      - ./finam-realm.json:/opt/keycloak/data/import/finam-realm.json:ro
+    networks:
+      - edge
+      - auth-db
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "exec 3<>/dev/tcp/127.0.0.1/9000; printf 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3; grep -q '200 OK' <&3",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+    security_opt:
+      - no-new-privileges:true
+
+  keycloak-db:
+    image: postgres:17.7-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?set KEYCLOAK_DB_PASSWORD}
+    volumes:
+      - keycloak-data:/var/lib/postgresql/data
+    networks:
+      - auth-db
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U keycloak -d keycloak"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    security_opt:
+      - no-new-privileges:true
+
+networks:
+  edge:
+  auth-db:
+    internal: true
+
+volumes:
+  keycloak-data:
