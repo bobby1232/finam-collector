@@ -99,7 +99,9 @@ services:
     healthcheck:
       test:
         [
-          "CMD-SHELL",
+          "CMD",
+          "bash",
+          "-c",
           "{ printf 'HEAD /health/ready HTTP/1.0\\r\\n\\r\\n' >&0; grep -q 'HTTP/1.0 200'; } 0<>/dev/tcp/localhost/9000",
         ]
       interval: 30s
