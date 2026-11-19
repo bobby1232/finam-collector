@@ -102,12 +102,12 @@ services:
           "CMD",
           "bash",
           "-c",
-          "{ printf 'HEAD /health/ready HTTP/1.0\\r\\n\\r\\n' >&0; grep -q '200 OK'; } 0<>/dev/tcp/localhost/9000",
+          "</dev/tcp/localhost/9000",
         ]
-      interval: 30s
+      interval: 5s
       timeout: 5s
-      retries: 10
-      start_period: 60s
+      retries: 12
+      start_period: 15s
     deploy:
       resources:
         limits:
