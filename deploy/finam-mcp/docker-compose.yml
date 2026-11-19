@@ -32,6 +32,7 @@ services:
       RESEARCH_API_TOKEN: ${RESEARCH_API_TOKEN}
       MCP_RESOURCE_URL: ${MCP_RESOURCE_URL}
       OAUTH_ISSUER_URL: ${OAUTH_ISSUER_URL}
+      OAUTH_JWKS_URL: http://keycloak:8080/oauth/realms/finam/protocol/openid-connect/certs
       OAUTH_AUDIENCE: ${MCP_RESOURCE_URL}
       MCP_REQUIRED_SCOPE: finam:read
       MCP_HOST: 0.0.0.0
