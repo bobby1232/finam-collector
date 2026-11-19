@@ -1,6 +1,8 @@
 services:
   gateway:
-    image: caddy:2.10.2-alpine
+    build:
+      context: .
+      dockerfile: Dockerfile.gateway
     restart: unless-stopped
     depends_on:
       finam-mcp:
@@ -11,8 +13,6 @@ services:
       MCP_PUBLIC_HOST: ${MCP_PUBLIC_HOST}
     ports:
       - "127.0.0.1:8765:8765"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
     networks:
       - edge
     read_only: true
@@ -63,7 +63,9 @@ services:
       - no-new-privileges:true
 
   keycloak:
-    image: quay.io/keycloak/keycloak:26.8.2
+    build:
+      context: .
+      dockerfile: Dockerfile.keycloak
     restart: unless-stopped
     command:
       - start
@@ -91,8 +93,6 @@ services:
       CHATGPT_OAUTH_CLIENT_SECRET: ${CHATGPT_OAUTH_CLIENT_SECRET}
       FINAM_MCP_USERNAME: ${FINAM_MCP_USERNAME}
       FINAM_MCP_USER_PASSWORD: ${FINAM_MCP_USER_PASSWORD}
-    volumes:
-      - ./finam-realm.json:/opt/keycloak/data/import/finam-realm.json:ro
     networks:
       - edge
       - auth-db
