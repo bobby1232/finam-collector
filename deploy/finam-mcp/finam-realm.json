@@ -81,10 +81,20 @@
           "protocolMapper": "oidc-audience-mapper",
           "consentRequired": false,
           "config": {
-            "included.client.audience": "finam-mcp-resource",
             "included.custom.audience": "${MCP_RESOURCE_URL}",
             "id.token.claim": "false",
             "access.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
+        },
+        {
+          "name": "subject",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-sub-mapper",
+          "consentRequired": false,
+          "config": {
+            "access.token.claim": "true",
+            "lightweight.claim": "true",
             "introspection.token.claim": "true"
           }
         }
@@ -106,4 +116,3 @@
     }
   ]
 }
-
