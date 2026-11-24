@@ -42,8 +42,6 @@ jobs:
         options: >-
           --health-cmd pg_isready --health-interval 5s
           --health-timeout 5s --health-retries 12
-    env:
-      FINAM_TEST_PG_URL: postgresql://postgres@localhost:${{ job.services.postgres.ports[5432] }}/postgres
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -55,6 +53,8 @@ jobs:
       - run: ruff check finam_mcp marketdata app/market*.py tests
       - run: mypy finam_mcp
       - run: pytest -q
+        env:
+          FINAM_TEST_PG_URL: postgresql://postgres@localhost:${{ job.services.postgres.ports[5432] }}/postgres
       - run: python -m compileall -q finam_mcp
       - run: pip-audit -r requirements-mcp.txt
       - run: docker compose -f deploy/finam-mcp/docker-compose.yml --env-file deploy/finam-mcp/.env.example config --quiet
