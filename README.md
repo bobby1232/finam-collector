@@ -55,3 +55,13 @@ Primary key: `(ticker, timeframe, ts)`. Recent/incomplete candles are refreshed 
 pip install -r requirements.txt
 uvicorn app.main:app --host 0.0.0.0 --port 8080
 ```
+
+## Market Data v2
+
+Ветка v2 добавляет защищённый REST API и 19 read-only инструментов MCP для рыночных
+данных и исследований. Сбор v2 включается через `MARKET_V2_MODE`. По умолчанию
+режим `off`, существующие API и MCP инструменты доступны.
+
+- [Аудит источников и roadmap](ROADMAP_MARKET_DATA_V2.md)
+- [Контракты API и MCP, проверка и результаты](docs/MARKET_DATA_V2.md)
+- [Миграция, Coolify и откат](docs/MARKET_DATA_V2_RUNBOOK.md)

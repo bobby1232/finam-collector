@@ -19,6 +19,7 @@ from .analytics import completed_bars, is_complete, technical_analysis, wilder_r
 from .auth import KeycloakJWTVerifier
 from .collector import CollectorClient, CollectorError
 from .config import Settings, get_settings
+from .market_tools import register_market_tools
 from .rate_limit import SlidingWindowRateLimiter
 
 READ_ONLY = ToolAnnotations(
@@ -64,7 +65,7 @@ def create_server(
         version="1.0.0",
         description="Read-only Si futures market data and descriptive technical analytics.",
         instructions=(
-            "Use these tools only to read Si futures candles and descriptive analytics. "
+            "Use these tools to read stored market data and descriptive analytics. "
             "The latest price is the close-so-far of a one-minute candle, not a tick quote. "
             "Never describe results as guaranteed, executable, or investment advice."
         ),
@@ -374,6 +375,7 @@ def create_server(
             ),
         }
 
+    register_market_tools(server, client, limiter, READ_ONLY)
     return server
 
 

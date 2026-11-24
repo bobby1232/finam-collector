@@ -2,6 +2,7 @@ from mcp.server.auth.provider import AccessToken
 from starlette.testclient import TestClient
 
 from finam_mcp.config import Settings
+from finam_mcp.market_tools import TOOLS
 from finam_mcp.server import create_server
 
 
@@ -11,6 +12,15 @@ class FakeCollector:
 
     async def health(self):
         return {"status": "ok", "poll_seconds": 30, "last_cycle": "2026-11-18T12:00:00Z"}
+
+    async def market_v2(self, path, params):
+        return {
+            "schema_version": "2.0",
+            "path": path,
+            "params": params,
+            "data": None,
+            "data_quality_status": "UNAVAILABLE",
+        }
 
     async def bars(self, symbol, interval, limit):
         return [
@@ -124,6 +134,7 @@ def test_initialize_tools_list_and_stale_quote_call():
             "get_si_analysis",
             "get_si_oversold_research",
             "get_collector_health",
+            *TOOLS,
         }
         assert all(item["annotations"]["readOnlyHint"] for item in tools)
 
@@ -171,3 +182,31 @@ def test_rate_limit_rejects_second_tool_call():
         result = client.post("/mcp", headers=headers, json=call).json()["result"]
         assert result["isError"] is True
         assert result["content"][0]["text"] == "Error executing tool get_si_quote"
+
+
+def test_market_snapshot_mcp_call_validates_shared_contract():
+    app = create_server(settings(), FakeCollector(), StaticVerifier()).streamable_http_app(
+        streamable_http_path="/mcp", stateless_http=True, json_response=True, host="testserver"
+    )
+    headers = {
+        "Authorization": "Bearer test-token",
+        "Accept": "application/json, text/event-stream",
+    }
+    call = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {
+            "name": "get_market_snapshot",
+            "arguments": {
+                "query": {"symbol": "SiZ6@RTSX", "timeframes": ["1m", "4h"], "orderbook_depth": 10},
+            },
+        },
+    }
+    with TestClient(app) as client:
+        response = client.post("/mcp", headers=headers, json=call).json()["result"]
+        assert response["structuredContent"]["path"] == "market/snapshot"
+        assert response["structuredContent"]["params"]["orderbook_depth"] == 10
+        call["params"]["arguments"]["query"]["extra_param"] = True
+        invalid = client.post("/mcp", headers=headers, json=call).json()["result"]
+        assert invalid["isError"]

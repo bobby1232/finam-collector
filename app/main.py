@@ -20,6 +20,10 @@ from .config import (
 from .db import Database, INTERVALS
 from .finam import FinamClient
 from .moex import MoexClient
+from .market_api import router as market_router
+from .market_calendar import sessions
+from .market_runtime import runtime as market_runtime
+from .market_store import MarketStore
 from .analysis import build_si_analysis, build_technical_snapshot, build_si_extended_snapshot
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -103,13 +107,7 @@ async def sync_one(db: Database, finam: FinamClient, symbol: str, timeframe: str
     )
 
 
-async def collector_loop():
-    db = Database(DATABASE_URL)
-    await asyncio.to_thread(db.init_schema)
-    finam = FinamClient(
-        FINAM_SECRET,
-        max_requests_per_second=FINAM_MAX_REQUESTS_PER_SECOND,
-    )
+async def collector_loop(db: Database, finam: FinamClient):
     state["finam_api"] = finam.stats
     cycle_lock = asyncio.Lock()
 
@@ -119,57 +117,53 @@ async def collector_loop():
         POLL_SECONDS,
     )
 
-    try:
-        while True:
-            cycle_started = time.monotonic()
-            if cycle_lock.locked():
-                state["overlap_skips"] += 1
-                await asyncio.sleep(POLL_SECONDS)
-                continue
+    while True:
+        cycle_started = time.monotonic()
+        if cycle_lock.locked():
+            state["overlap_skips"] += 1
+            await asyncio.sleep(POLL_SECONDS)
+            continue
 
-            async with cycle_lock:
-                state["cycle_running"] = True
-                try:
-                    for instrument in INSTRUMENTS:
-                        try:
-                            await sync_one(
-                                db,
-                                finam,
-                                instrument.symbol,
-                                instrument.timeframe,
-                                instrument.history_days,
-                            )
-                        except Exception as exc:
-                            k = key(instrument.symbol, instrument.timeframe)
-                            previous = state["instruments"].get(k, {})
-                            state["instruments"][k] = {
-                                **previous,
-                                "symbol": instrument.symbol,
-                                "timeframe": instrument.timeframe,
-                                "last_error": repr(exc),
-                            }
-                            log.exception(
-                                "Sync failed symbol=%s timeframe=%s",
-                                instrument.symbol,
-                                instrument.timeframe,
-                            )
-                    state["last_cycle"] = datetime.now(timezone.utc).isoformat()
-                finally:
-                    state["cycle_running"] = False
-                    state["cycle_duration_seconds"] = round(
-                        time.monotonic() - cycle_started,
-                        3,
-                    )
+        async with cycle_lock:
+            state["cycle_running"] = True
+            try:
+                for instrument in INSTRUMENTS:
+                    try:
+                        await sync_one(
+                            db,
+                            finam,
+                            instrument.symbol,
+                            instrument.timeframe,
+                            instrument.history_days,
+                        )
+                    except Exception as exc:
+                        k = key(instrument.symbol, instrument.timeframe)
+                        previous = state["instruments"].get(k, {})
+                        state["instruments"][k] = {
+                            **previous,
+                            "symbol": instrument.symbol,
+                            "timeframe": instrument.timeframe,
+                            "last_error": repr(exc),
+                        }
+                        log.exception(
+                            "Sync failed symbol=%s timeframe=%s",
+                            instrument.symbol,
+                            instrument.timeframe,
+                        )
+                state["last_cycle"] = datetime.now(timezone.utc).isoformat()
+            finally:
+                state["cycle_running"] = False
+                state["cycle_duration_seconds"] = round(
+                    time.monotonic() - cycle_started,
+                    3,
+                )
 
-            # Fixed-rate intent with single-flight execution: if a cycle takes
-            # longer than the interval, the next cycle starts immediately but
-            # never concurrently.
-            remaining = POLL_SECONDS - (time.monotonic() - cycle_started)
-            if remaining > 0:
-                await asyncio.sleep(remaining)
-    finally:
-        await finam.close()
-
+        # Fixed-rate intent with single-flight execution: if a cycle takes
+        # longer than the interval, the next cycle starts immediately but
+        # never concurrently.
+        remaining = POLL_SECONDS - (time.monotonic() - cycle_started)
+        if remaining > 0:
+            await asyncio.sleep(remaining)
 
 async def backfill_instrument(
     db: Database,
@@ -326,19 +320,32 @@ async def log_rosn_snapshot_once():
 async def lifespan(app: FastAPI):
     db = Database(DATABASE_URL)
     await asyncio.to_thread(db.init_schema)
-    collector = asyncio.create_task(collector_loop())
+    store = MarketStore(DATABASE_URL)
+    await asyncio.to_thread(store.migrate)
+    mode = os.getenv("MARKET_V2_MODE", "off").lower()
+    if mode not in {"off", "rest", "stream"}:
+        raise RuntimeError("MARKET_V2_MODE must be off, rest or stream")
+    app.state.market_mode = mode
+    app.state.market_active_symbol, app.state.market_contracts = None, []
+    app.state.market_sessions = await asyncio.to_thread(sessions)
+    finam = FinamClient(FINAM_SECRET, max_requests_per_second=FINAM_MAX_REQUESTS_PER_SECOND)
+    collector = asyncio.create_task(collector_loop(db, finam))
     backfill = asyncio.create_task(backfill_loop())
     gmkn_snapshot = asyncio.create_task(log_gmkn_snapshot_once())
     si_snapshot = asyncio.create_task(log_si_snapshot_once())
     rosn_snapshot = asyncio.create_task(log_rosn_snapshot_once())
-    yield
-    for task in (collector, backfill, gmkn_snapshot, si_snapshot, rosn_snapshot):
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
-
+    tasks = [collector, backfill, gmkn_snapshot, si_snapshot, rosn_snapshot]
+    if mode != "off":
+        tasks.append(asyncio.create_task(
+            market_runtime(app, store, finam, mode, sync_one, db, FINAM_LIVE_SYMBOLS)
+        ))
+    try:
+        yield
+    finally:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        await finam.close()
 
 app = FastAPI(title="Finam Quotes Collector", lifespan=lifespan)
 
@@ -460,3 +467,4 @@ async def si_analysis():
 # Protected read-only research endpoints.
 from app.research_api import router as research_router
 app.include_router(research_router)
+app.include_router(market_router)

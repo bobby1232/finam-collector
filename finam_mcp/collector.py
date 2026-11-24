@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -97,6 +98,30 @@ class CollectorClient:
 
     async def health(self) -> dict[str, Any]:
         return await self._get("/health")
+
+    async def market_v2(self, path: str, params: dict[str, Any]) -> dict[str, Any]:
+        token = self.settings.research_api_token.get_secret_value()
+        if len(token) < 32:
+            raise CollectorError("Collector API token is not configured")
+        try:
+            async with self.client.stream(
+                "GET",
+                f"/api/v2/{path}",
+                params=params,
+                headers={"Authorization": f"Bearer {token}"},
+            ) as response:
+                response.raise_for_status()
+                body = bytearray()
+                async for chunk in response.aiter_bytes():
+                    if len(body) + len(chunk) > 1_048_576:
+                        raise CollectorError("Market v2 response exceeds size limit")
+                    body.extend(chunk)
+                payload = json.loads(body)
+                if not isinstance(payload, dict) or payload.get("schema_version") != "2.0":
+                    raise CollectorError("Unexpected market data schema")
+                return payload
+        except (httpx.HTTPError, ValueError) as exc:
+            raise CollectorError("Collector market v2 request failed") from exc
 
     async def oversold_research(
         self, symbol: str, timeframe: str, thresholds: str, horizons: str

@@ -4,6 +4,10 @@ on:
   push:
     paths:
       - "finam_mcp/**"
+      - "marketdata/**"
+      - "app/**"
+      - "requirements.txt"
+      - "Dockerfile"
       - "tests/**"
       - "requirements-mcp*.txt"
       - "Dockerfile.mcp"
@@ -12,6 +16,10 @@ on:
   pull_request:
     paths:
       - "finam_mcp/**"
+      - "marketdata/**"
+      - "app/**"
+      - "requirements.txt"
+      - "Dockerfile"
       - "tests/**"
       - "requirements-mcp*.txt"
       - "Dockerfile.mcp"
@@ -24,15 +32,27 @@ jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432/tcp
+        options: >-
+          --health-cmd pg_isready --health-interval 5s
+          --health-timeout 5s --health-retries 12
+    env:
+      FINAM_TEST_PG_URL: postgresql://postgres@localhost:${{ job.services.postgres.ports[5432] }}/postgres
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
-      - run: pip install -r requirements-mcp-dev.txt
-      - run: ruff format --check finam_mcp tests
-      - run: ruff check finam_mcp tests
+      - run: pip install -r requirements-mcp-dev.txt -r requirements.txt
+      - run: ruff format --check finam_mcp marketdata app/market*.py tests
+      - run: ruff check finam_mcp marketdata app/market*.py tests
       - run: mypy finam_mcp
       - run: pytest -q
       - run: python -m compileall -q finam_mcp
