@@ -11,6 +11,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY app ./app
 COPY marketdata ./marketdata
+RUN chmod -R a+rX app marketdata
 
 USER 10001:10001
 EXPOSE 8080
