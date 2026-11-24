@@ -74,6 +74,9 @@
         "acr",
         "finam:read"
       ],
+      "optionalClientScopes": [
+        "offline_access"
+      ],
       "protocolMappers": [
         {
           "name": "finam-mcp-audience",
@@ -106,6 +109,9 @@
       "username": "${FINAM_MCP_USERNAME}",
       "enabled": true,
       "emailVerified": true,
+      "realmRoles": [
+        "offline_access"
+      ],
       "credentials": [
         {
           "type": "password",
