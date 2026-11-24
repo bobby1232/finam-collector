@@ -77,6 +77,7 @@ def test_health_does_not_disclose_secrets():
         assert response.status_code == 200
         payload = response.json()
         assert payload["oauth_required"] is True
+        assert payload["poll_seconds"] == 30
         assert "token" not in response.text.lower()
 
 

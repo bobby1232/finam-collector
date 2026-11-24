@@ -87,10 +87,12 @@ class Database:
     ) -> int:
         if not bars:
             return 0
-        rows = []
+        # A response may contain the currently forming candle more than once.
+        # Keep the last representation for each timestamp before issuing SQL.
+        unique_rows: dict[datetime, tuple[Any, ...]] = {}
         for bar in bars:
             ts = datetime.fromisoformat(bar["timestamp"].replace("Z", "+00:00"))
-            rows.append((
+            unique_rows[ts] = (
                 ticker,
                 timeframe,
                 ts,
@@ -100,7 +102,8 @@ class Database:
                 _num(bar["close"]),
                 _num(bar["volume"]) if bar.get("volume") is not None else None,
                 source,
-            ))
+            )
+        rows = [unique_rows[ts] for ts in sorted(unique_rows)]
         with psycopg.connect(self.url) as conn:
             with conn.cursor() as cur:
                 cur.executemany(UPSERT_SQL, rows)

@@ -18,7 +18,8 @@ Instruments are configured in one variable:
 
 ```env
 INSTRUMENTS=GAZP@MISX:TIME_FRAME_M1,SiZ6@RTSX:TIME_FRAME_M1
-POLL_SECONDS=30
+POLL_SECONDS=1
+FINAM_MAX_REQUESTS_PER_SECOND=3
 ```
 
 `SiZ6` is the MOEX Si-12.26 USD/RUB futures contract, expiration 2026-12-17.

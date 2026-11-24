@@ -96,5 +96,10 @@ def parse_instruments() -> list[Instrument]:
 
 INSTRUMENTS = parse_instruments()
 
-# How often the worker checks Finam. Current/unfinished candle is refreshed via UPSERT.
-POLL_SECONDS = max(15, int(os.getenv("POLL_SECONDS", "30")))
+# How often the worker starts a Finam synchronization cycle. The loop itself is
+# single-flight, so a slow cycle is never overlapped by the next one.
+POLL_SECONDS = max(1, int(os.getenv("POLL_SECONDS", "1")))
+FINAM_MAX_REQUESTS_PER_SECOND = max(
+    0.1,
+    float(os.getenv("FINAM_MAX_REQUESTS_PER_SECOND", "3")),
+)

@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -9,7 +10,13 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 
-from .config import DATABASE_URL, FINAM_SECRET, INSTRUMENTS, POLL_SECONDS
+from .config import (
+    DATABASE_URL,
+    FINAM_MAX_REQUESTS_PER_SECOND,
+    FINAM_SECRET,
+    INSTRUMENTS,
+    POLL_SECONDS,
+)
 from .db import Database, INTERVALS
 from .finam import FinamClient
 from .moex import MoexClient
@@ -24,7 +31,11 @@ BACKFILL_CONCURRENCY = max(1, min(int(os.getenv("BACKFILL_CONCURRENCY", "3")), 5
 
 state = {
     "last_cycle": None,
+    "cycle_running": False,
+    "cycle_duration_seconds": None,
+    "overlap_skips": 0,
     "instruments": {},
+    "finam_api": {},
     "backfill": {
         "enabled": BACKFILL_ENABLED,
         "from": BACKFILL_FROM,
@@ -95,7 +106,12 @@ async def sync_one(db: Database, finam: FinamClient, symbol: str, timeframe: str
 async def collector_loop():
     db = Database(DATABASE_URL)
     await asyncio.to_thread(db.init_schema)
-    finam = FinamClient(FINAM_SECRET)
+    finam = FinamClient(
+        FINAM_SECRET,
+        max_requests_per_second=FINAM_MAX_REQUESTS_PER_SECOND,
+    )
+    state["finam_api"] = finam.stats
+    cycle_lock = asyncio.Lock()
 
     log.info(
         "Collector started instruments=%s poll=%ss",
@@ -105,24 +121,52 @@ async def collector_loop():
 
     try:
         while True:
-            for instrument in INSTRUMENTS:
-                try:
-                    await sync_one(
-                        db, finam, instrument.symbol, instrument.timeframe, instrument.history_days
-                    )
-                except Exception as exc:
-                    k = key(instrument.symbol, instrument.timeframe)
-                    previous = state["instruments"].get(k, {})
-                    state["instruments"][k] = {
-                        **previous,
-                        "symbol": instrument.symbol,
-                        "timeframe": instrument.timeframe,
-                        "last_error": repr(exc),
-                    }
-                    log.exception("Sync failed symbol=%s timeframe=%s", instrument.symbol, instrument.timeframe)
+            cycle_started = time.monotonic()
+            if cycle_lock.locked():
+                state["overlap_skips"] += 1
+                await asyncio.sleep(POLL_SECONDS)
+                continue
 
-            state["last_cycle"] = datetime.now(timezone.utc).isoformat()
-            await asyncio.sleep(POLL_SECONDS)
+            async with cycle_lock:
+                state["cycle_running"] = True
+                try:
+                    for instrument in INSTRUMENTS:
+                        try:
+                            await sync_one(
+                                db,
+                                finam,
+                                instrument.symbol,
+                                instrument.timeframe,
+                                instrument.history_days,
+                            )
+                        except Exception as exc:
+                            k = key(instrument.symbol, instrument.timeframe)
+                            previous = state["instruments"].get(k, {})
+                            state["instruments"][k] = {
+                                **previous,
+                                "symbol": instrument.symbol,
+                                "timeframe": instrument.timeframe,
+                                "last_error": repr(exc),
+                            }
+                            log.exception(
+                                "Sync failed symbol=%s timeframe=%s",
+                                instrument.symbol,
+                                instrument.timeframe,
+                            )
+                    state["last_cycle"] = datetime.now(timezone.utc).isoformat()
+                finally:
+                    state["cycle_running"] = False
+                    state["cycle_duration_seconds"] = round(
+                        time.monotonic() - cycle_started,
+                        3,
+                    )
+
+            # Fixed-rate intent with single-flight execution: if a cycle takes
+            # longer than the interval, the next cycle starts immediately but
+            # never concurrently.
+            remaining = POLL_SECONDS - (time.monotonic() - cycle_started)
+            if remaining > 0:
+                await asyncio.sleep(remaining)
     finally:
         await finam.close()
 
